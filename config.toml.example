@@ -1,0 +1,23 @@
+# Business configuration. Do not put API keys here.
+
+[models]
+chat_model = "qwen-plus"
+embedding_model = "text-embedding-v3"
+embedding_dimensions = 1024
+
+[memory]
+auto_retrieve_limit = 5
+tool_retrieve_limit = 10
+max_injected_tokens = 1200
+vector_weight = 0.7
+keyword_weight = 0.3
+max_retries = 3
+
+[agent]
+recent_turns = 8
+max_tool_rounds = 4
+
+[security]
+max_input_chars = 4000
+secret_redaction_enabled = true
+

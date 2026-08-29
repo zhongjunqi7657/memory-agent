@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.env
+.env.*
+!.env.example
+dist/
+node_modules/
+frontend/.vite/
+frontend/dist/
+coverage.xml
+.coverage
+
