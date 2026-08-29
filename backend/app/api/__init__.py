@@ -1,2 +1,1 @@
 """HTTP and SSE endpoints."""
-

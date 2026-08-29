@@ -767,6 +767,7 @@ dependencies = [
     { name = "pgvector" },
     { name = "pydantic-settings" },
     { name = "sqlalchemy", extra = ["asyncio"] },
+    { name = "tomli", marker = "python_full_version < '3.11'" },
     { name = "uvicorn", extra = ["standard"] },
 ]
 
@@ -789,6 +790,7 @@ requires-dist = [
     { name = "pgvector", specifier = ">=0.3,<1" },
     { name = "pydantic-settings", specifier = ">=2.7,<3" },
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2,<3" },
+    { name = "tomli", marker = "python_full_version < '3.11'", specifier = ">=2,<3" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34,<1" },
 ]
 

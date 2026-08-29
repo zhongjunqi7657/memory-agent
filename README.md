@@ -50,7 +50,27 @@ docs/                     Architecture and interview notes
 - 任何秘密先在本机脱敏，再发送给模型或写入数据库。
 - 真实模型调用不进入默认 CI，使用 Fake Provider 测试。
 
-## 阶段状态
+## 当前阶段
 
-当前处于第 0 阶段：环境和项目边界已确认，Docker Desktop 已安装，WSL 需要重启后生效。
+第 1 阶段已完成：数据库模型与迁移、千问适配器、LangGraph 对话闭环、记忆治理、记忆查询/修改接口和提取 Worker 骨架均已落地。真实 PostgreSQL 迁移需要 Docker Desktop 的 Linux 引擎可用。
 
+## 本地运行
+
+1. 复制配置：`Copy-Item .env.example .env`，填写 `DASHSCOPE_API_KEY`、`DASHSCOPE_BASE_URL` 和 `POSTGRES_PASSWORD`。
+2. 复制业务配置：`Copy-Item config.toml.example config.toml`，按需调整模型名和阈值。
+3. 启动数据库：`docker compose up -d postgres`。
+4. 执行迁移：`cd backend; uv run alembic upgrade head`。
+5. 启动 API：`uv run uvicorn app.main:app --reload`。
+6. 单独启动记忆 Worker：`uv run python -m app.jobs.worker`。
+
+### API 示例
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"user_key":"demo-user","content":"我计划两个月内完成 Agent 项目"}'
+
+curl "http://127.0.0.1:8000/v1/memories?user_key=demo-user"
+```
+
+聊天请求会先在本机脱敏，再写入消息并排队记忆提取任务；API 响应中的 `redacted` 和 `redaction_categories` 可直接用于前端的折叠提示。记忆候选由 Worker 通过结构化输出提取，普通明确信息自动生效，敏感/推断信息进入 `pending`，秘密直接丢弃。
