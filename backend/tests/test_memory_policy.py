@@ -10,6 +10,12 @@ def test_secret_is_redacted_before_storage() -> None:
     assert "[REDACTED]" in result.text
 
 
+def test_environment_style_api_key_is_redacted() -> None:
+    result = redact_secrets("DASHSCOPE_API_KEY=demo-secret-value")
+    assert result.redacted is True
+    assert "demo-secret-value" not in result.text
+
+
 def test_explicit_normal_memory_becomes_active() -> None:
     assessment = assess_candidate(
         MemoryCandidate(

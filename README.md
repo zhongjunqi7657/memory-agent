@@ -63,6 +63,8 @@ docs/                     Architecture and interview notes
 5. 启动 API：`uv run uvicorn app.main:app --reload`。
 6. 单独启动记忆 Worker：`uv run python -m app.jobs.worker`。
 
+另开一个终端启动前端：`cd frontend; npm install; npm run dev`，然后访问 `http://localhost:5173`。前端会将 `/v1` 请求代理到 FastAPI；也可以通过 `VITE_API_BASE_URL` 指向已部署的 API。
+
 ### API 示例
 
 ```bash

@@ -16,7 +16,9 @@ class RedactionResult:
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
     (
         "api_key",
-        re.compile(r"(?i)(\b(?:api[_ -]?key|access[_ -]?key)\b\s*[:=]\s*)[^\s,;]+"),
+        re.compile(
+            r"(?i)(\b[\w-]*(?:api[_ -]?key|access[_ -]?key)\b\s*[:=]\s*)[^\s,;]+"
+        ),
     ),
     (
         "token",

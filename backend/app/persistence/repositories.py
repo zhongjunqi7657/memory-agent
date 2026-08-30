@@ -97,7 +97,10 @@ class ConversationRepository:
         return message
 
     async def create_run(self, conversation_id: UUID) -> Run:
+        from datetime import datetime, timezone
+
         run = Run(conversation_id=conversation_id, status=RunStatus.RUNNING)
+        run.started_at = datetime.now(timezone.utc)
         self.session.add(run)
         await self.session.flush()
         return run
