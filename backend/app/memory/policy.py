@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from enum import Enum
 
@@ -35,6 +36,24 @@ class MemoryAssessment:
     confidence: float
 
 
+_SENSITIVE_PATTERNS = (
+    re.compile(r"(?:病史|诊断|抑郁|焦虑症|服药|手术|体检结果|健康状况)"),
+    re.compile(r"(?:收入|工资|负债|欠款|存款|资产|贷款金额)"),
+    re.compile(r"(?:家庭住址|详细地址|门牌号|住在.+(?:路|街|小区|栋|室))"),
+    re.compile(r"(?:政治立场|宗教信仰|性取向|性生活)"),
+)
+
+
+def detect_sensitivity(content: str) -> MemorySensitivity:
+    """Apply local minimum-risk classification before trusting model labels."""
+
+    if "[REDACTED" in content or redact_secrets(content).redacted:
+        return MemorySensitivity.SECRET
+    if any(pattern.search(content) for pattern in _SENSITIVE_PATTERNS):
+        return MemorySensitivity.SENSITIVE
+    return MemorySensitivity.NORMAL
+
+
 def assess_candidate(
     candidate: MemoryCandidate, *, config: MemoryConfig | None = None
 ) -> MemoryAssessment:
@@ -42,7 +61,11 @@ def assess_candidate(
 
     business = config or get_business_config().memory
     redaction = redact_secrets(candidate.content)
-    if candidate.sensitivity is MemorySensitivity.SECRET or redaction.redacted:
+    detected_sensitivity = detect_sensitivity(candidate.content)
+    if (
+        candidate.sensitivity is MemorySensitivity.SECRET
+        or detected_sensitivity is MemorySensitivity.SECRET
+    ):
         return MemoryAssessment(
             decision=MemoryDecision.REJECT,
             content=redaction.text,
@@ -52,6 +75,7 @@ def assess_candidate(
         )
     if (
         candidate.sensitivity is MemorySensitivity.SENSITIVE
+        or detected_sensitivity is MemorySensitivity.SENSITIVE
         or not candidate.explicit
         or candidate.confidence < business.active_confidence_threshold
     ):
@@ -62,7 +86,11 @@ def assess_candidate(
             decision=MemoryDecision.PENDING,
             content=candidate.content,
             reason=reason,
-            sensitivity=candidate.sensitivity,
+            sensitivity=(
+                MemorySensitivity.SENSITIVE
+                if detected_sensitivity is MemorySensitivity.SENSITIVE
+                else candidate.sensitivity
+            ),
             confidence=candidate.confidence,
         )
     return MemoryAssessment(

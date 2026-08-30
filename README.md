@@ -52,7 +52,7 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-第 1 阶段已完成：数据库模型与迁移、千问适配器、LangGraph 对话闭环、记忆治理、记忆查询/修改接口和提取 Worker 骨架均已落地。真实 PostgreSQL 迁移需要 Docker Desktop 的 Linux 引擎可用。
+首版主链路已完成：数据库模型与迁移、千问适配器、LangGraph 对话闭环、混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。Worker 具备租约、幂等键、失败重试和超时任务重新领取字段。真实 PostgreSQL/pgvector 集成仍需要 Docker Desktop 的 Linux 引擎可用。
 
 ## 本地运行
 
@@ -73,6 +73,21 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
   -d '{"user_key":"demo-user","content":"我计划两个月内完成 Agent 项目"}'
 
 curl "http://127.0.0.1:8000/v1/memories?user_key=demo-user"
+
+# 显式记忆控制（不会经过普通聊天提取队列）
+curl -X POST http://127.0.0.1:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"user_key":"demo-user","content":"请记住我喜欢先理解原理再看代码"}'
+
+curl -X POST http://127.0.0.1:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"user_key":"demo-user","content":"忘记我之前说的考研计划"}'
+
+curl -X POST http://127.0.0.1:8000/v1/chat \
+  -H "Content-Type: application/json" \
+  -d '{"user_key":"demo-user","content":"你记住了我什么？"}'
 ```
 
 聊天请求会先在本机脱敏，再写入消息并排队记忆提取任务；前端通过 `POST /v1/chat/stream` 消费 SSE 运行事件，最终事件携带回答和 `redacted` 元数据，可直接用于折叠提示。记忆候选由 Worker 通过结构化输出提取，普通明确信息自动生效，敏感/推断信息进入 `pending`，秘密直接丢弃。
+
+以“请记住/忘记/把……改成……”开头的显式指令会直接进入记忆治理服务：普通事实立即生效，敏感内容进入待确认，凭据和个人号码在本机脱敏后不写入长期记忆。更正产生新版本时，旧记忆标记为 `superseded`；待确认的新版本不会立即淘汰旧记忆。

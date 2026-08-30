@@ -12,8 +12,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.graph import build_graph
 from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import Settings, get_settings
+from app.memory.commands import MemoryCommandType, parse_memory_command
+from app.memory.service import MemoryService
 from app.models.qwen import create_chat_model, create_embedding_model
-from app.persistence.models import MessageRole, RunStatus
+from app.persistence.models import MemoryStatus, MessageRole, RunStatus
 from app.persistence.repositories import ConversationRepository, MemoryRepository
 from app.security.redaction import redact_secrets
 
@@ -104,7 +106,144 @@ class AgentService:
                     }
                 )
 
+        async def finish_success(
+            answer: str,
+            *,
+            memory_count: int,
+            queue_extraction: bool,
+            memory_command: str | None = None,
+        ) -> dict[str, object]:
+            assistant_sequence = await repository.next_message_sequence(conversation.id)
+            await repository.add_message(
+                conversation.id,
+                role=MessageRole.ASSISTANT,
+                content=answer,
+                sequence=assistant_sequence,
+            )
+            if queue_extraction:
+                await repository.queue_extraction_job(
+                    user.id, conversation.id, user_message.id
+                )
+                await emit("memory.extraction_queued")
+            await repository.finish_run(run, status=RunStatus.COMPLETED)
+            await emit(
+                "run.completed",
+                {
+                    "conversation_id": str(conversation.id),
+                    "run_id": str(run.id),
+                    "message": answer,
+                    "redacted": redaction.redacted,
+                    "redaction_categories": list(redaction.categories),
+                    "memory_count": memory_count,
+                    "memory_command": memory_command,
+                },
+            )
+            await self.session.commit()
+            return {
+                "conversation_id": conversation.id,
+                "run_id": run.id,
+                "message": answer,
+                "redacted": redaction.redacted,
+                "redaction_categories": redaction.categories,
+                "memory_count": memory_count,
+                "memory_command": memory_command,
+                "created_at": datetime.now(timezone.utc),
+            }
+
+        async def finish_failure(error: Exception) -> None:
+            safe_error = redact_secrets(str(error)).text[:500]
+            await repository.finish_run(
+                run, status=RunStatus.FAILED, error_message=safe_error
+            )
+            await emit("run.failed", {"message": "模型运行失败"})
+            await self.session.commit()
+
         await emit("run.started", {"conversation_id": str(conversation.id)})
+        command = parse_memory_command(redaction.text)
+        if command:
+            try:
+                memory_service = MemoryService(self.session, business=self.business)
+                response_memory_count = 0
+                if command.type is MemoryCommandType.SAVE:
+                    if redaction.redacted:
+                        answer = "出于安全考虑，包含凭据的内容不会写入长期记忆。"
+                        memory_count = 0
+                        outcome = "rejected_secret"
+                    else:
+                        memory = await memory_service.add_explicit(
+                            user_id=user.id,
+                            content=command.target,
+                            source_message_id=user_message.id,
+                        )
+                        answer = "这条内容没有被写入长期记忆。"
+                        if memory and memory.status is MemoryStatus.ACTIVE:
+                            answer = f"已记住：{memory.content}"
+                        elif memory:
+                            answer = "这条信息已加入待确认列表，不会直接用于后续回答。"
+                        memory_count = 1 if memory else 0
+                        outcome = (
+                            memory.status.value if memory else "rejected"
+                        )
+                elif command.type is MemoryCommandType.FORGET:
+                    deleted = await memory_service.forget(
+                        user_id=user.id, query=command.target
+                    )
+                    answer = (
+                        f"已删除 {len(deleted)} 条相关长期记忆。"
+                        if deleted
+                        else "没有找到匹配的长期记忆。"
+                    )
+                    memory_count = 0
+                    outcome = "deleted" if deleted else "not_found"
+                elif command.type is MemoryCommandType.LIST:
+                    active_memories = await memory_service.list_active(user_id=user.id)
+                    if active_memories:
+                        answer = "我目前记住了：\n" + "\n".join(
+                            f"- {memory.content}" for memory in active_memories
+                        )
+                    else:
+                        answer = "目前还没有已生效的长期记忆。"
+                    memory_count = 0
+                    response_memory_count = len(active_memories)
+                    outcome = "listed"
+                else:
+                    new_memory, superseded = await memory_service.correct(
+                        user_id=user.id,
+                        old_query=command.target,
+                        replacement=command.replacement or "",
+                        source_message_id=user_message.id,
+                    )
+                    answer = "这条更正没有被写入长期记忆。"
+                    if new_memory and new_memory.status is MemoryStatus.ACTIVE:
+                        answer = f"已更新记忆：{new_memory.content}"
+                    elif new_memory:
+                        answer = "这条更正已加入待确认列表，旧记忆暂时保持有效。"
+                    memory_count = 1 if new_memory else 0
+                    outcome = (
+                        f"corrected_{new_memory.status.value}"
+                        if new_memory
+                        else "rejected"
+                    )
+                    if superseded:
+                        outcome = f"{outcome}_{len(superseded)}_superseded"
+                await emit(
+                    "memory.command_applied",
+                    {
+                        "command": command.type.value,
+                        "outcome": outcome,
+                        "changed_count": memory_count,
+                    },
+                )
+                return await finish_success(
+                    answer,
+                    memory_count=response_memory_count,
+                    queue_extraction=False,
+                    memory_command=command.type.value,
+                )
+            except Exception as error:
+                await finish_failure(error)
+                raise
+
         query_embedding = None
         if self.embedding_model:
             try:
@@ -141,45 +280,9 @@ class AgentService:
             )
             answer = str(result["messages"][-1].content)
             await emit("model.completed", {"answer_length": len(answer)})
-            assistant_sequence = await repository.next_message_sequence(conversation.id)
-            await repository.add_message(
-                conversation.id,
-                role=MessageRole.ASSISTANT,
-                content=answer,
-                sequence=assistant_sequence,
+            return await finish_success(
+                answer, memory_count=len(memories), queue_extraction=True
             )
-            await repository.queue_extraction_job(
-                user.id, conversation.id, user_message.id
-            )
-            await emit("memory.extraction_queued")
-            await repository.finish_run(run, status=RunStatus.COMPLETED)
-            await emit(
-                "run.completed",
-                {
-                    "conversation_id": str(conversation.id),
-                    "run_id": str(run.id),
-                    "message": answer,
-                    "redacted": redaction.redacted,
-                    "redaction_categories": list(redaction.categories),
-                    "memory_count": len(memories),
-                },
-            )
-            await self.session.commit()
         except Exception as error:
-            safe_error = redact_secrets(str(error)).text[:500]
-            await repository.finish_run(
-                run, status=RunStatus.FAILED, error_message=safe_error
-            )
-            await emit("run.failed", {"message": "模型运行失败"})
-            await self.session.commit()
+            await finish_failure(error)
             raise
-
-        return {
-            "conversation_id": conversation.id,
-            "run_id": run.id,
-            "message": answer,
-            "redacted": redaction.redacted,
-            "redaction_categories": redaction.categories,
-            "memory_count": len(memories),
-            "created_at": datetime.now(timezone.utc),
-        }

@@ -30,6 +30,7 @@ class ChatResponse(BaseModel):
     redacted: bool
     redaction_categories: tuple[str, ...]
     memory_count: int
+    memory_command: str | None = None
 
 
 def format_sse(event: dict[str, object]) -> str:

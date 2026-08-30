@@ -25,6 +25,9 @@ class FakeSession:
     async def scalars(self, _statement):
         return []
 
+    async def scalar(self, _statement):
+        return None
+
     def add(self, item):
         self.added.append(item)
 

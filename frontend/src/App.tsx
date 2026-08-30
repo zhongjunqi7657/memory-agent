@@ -24,6 +24,7 @@ type ChatMessage = {
   content: string;
   memoryCount?: number;
   redacted?: boolean;
+  memoryCommand?: string | null;
 };
 
 const initialMessages: ChatMessage[] = [
@@ -92,6 +93,7 @@ function App() {
           "memory.retrieved": "已完成长期记忆检索",
           "model.completed": "正在整理回答",
           "memory.extraction_queued": "已排队更新长期记忆",
+          "memory.command_applied": "已处理记忆指令",
         };
         setLiveEvent(labels[event.event_type] ?? null);
       });
@@ -102,6 +104,7 @@ function App() {
         content: response.message,
         memoryCount: response.memory_count,
         redacted: response.redacted,
+        memoryCommand: response.memory_command,
       };
       setMessages((current) => [...current, assistantMessage]);
       setOpenNotice(response.run_id);
@@ -195,12 +198,16 @@ function App() {
                     <div className="run-notice">
                       <button className="notice-toggle" onClick={() => setOpenNotice((current) => current === message.id ? null : message.id)}>
                         <BookOpen size={14} />
-                        <span>{message.memoryCount > 0 ? `本次参考了 ${message.memoryCount} 条长期记忆` : "本次没有匹配到长期记忆"}</span>
+                        <span>{message.memoryCommand ? "本次已处理记忆指令" : message.memoryCount > 0 ? `本次参考了 ${message.memoryCount} 条长期记忆` : "本次没有匹配到长期记忆"}</span>
                         {openNotice === message.id ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </button>
                       {openNotice === message.id && (
                         <div className="notice-detail">
-                          {message.redacted ? "已在本机识别并脱敏敏感凭据。" : "本次消息已加入记忆提取队列，普通明确事实会自动处理。"}
+                          {message.redacted
+                            ? "已在本机识别并脱敏敏感凭据。"
+                            : message.memoryCommand
+                              ? "已直接处理这条记忆指令。"
+                              : "本次消息已加入记忆提取队列，普通明确事实会自动处理。"}
                         </div>
                       )}
                     </div>

@@ -20,6 +20,7 @@ export interface ChatResponse {
   redacted: boolean;
   redaction_categories: string[];
   memory_count: number;
+  memory_command?: string | null;
 }
 
 export interface RunEvent {

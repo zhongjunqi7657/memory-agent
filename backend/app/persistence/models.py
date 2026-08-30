@@ -231,7 +231,9 @@ class ExtractionJob(TimestampMixin, Base):
     __tablename__ = "extraction_jobs"
     __table_args__ = (
         Index("ix_extraction_jobs_status_created", "status", "created_at"),
+        Index("ix_extraction_jobs_status_available", "status", "available_at"),
         Index("ix_extraction_jobs_user_created", "user_id", "created_at"),
+        UniqueConstraint("idempotency_key", name="uq_extraction_jobs_idempotency_key"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -250,10 +252,16 @@ class ExtractionJob(TimestampMixin, Base):
         nullable=False,
     )
     attempts: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    available_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    locked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    locked_by: Mapped[str | None] = mapped_column(String(100))
+    idempotency_key: Mapped[str] = mapped_column(String(200), nullable=False)
     payload: Mapped[dict[str, Any]] = mapped_column(
         JSON_TYPE, default=dict, nullable=False
     )
-    error_message: Mapped[str | None] = mapped_column(Text)
+    last_error: Mapped[str | None] = mapped_column(Text)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 

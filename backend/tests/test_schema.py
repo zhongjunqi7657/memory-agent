@@ -24,6 +24,17 @@ def test_initial_schema_contract() -> None:
         for constraint in messages.constraints
     )
 
+    jobs = Base.metadata.tables["extraction_jobs"]
+    assert jobs.c.available_at.nullable is False
+    assert jobs.c.idempotency_key.nullable is False
+    assert {"locked_at", "locked_by", "last_error"}.issubset(
+        set(jobs.c.keys())
+    )
+    assert any(
+        constraint.name == "uq_extraction_jobs_idempotency_key"
+        for constraint in jobs.constraints
+    )
+
 
 def test_memory_response_reads_the_reserved_metadata_column() -> None:
     response = MemoryResponse.model_validate(

@@ -158,13 +158,28 @@ class ConversationRepository:
         return list(result.all())
 
     async def queue_extraction_job(
-        self, user_id: UUID, conversation_id: UUID, message_id: UUID
+        self,
+        user_id: UUID,
+        conversation_id: UUID,
+        message_id: UUID,
+        *,
+        payload: dict | None = None,
     ) -> ExtractionJob:
+        idempotency_key = f"message:{message_id}"
+        existing = await self.session.scalar(
+            select(ExtractionJob).where(
+                ExtractionJob.idempotency_key == idempotency_key
+            )
+        )
+        if existing:
+            return existing
         job = ExtractionJob(
             user_id=user_id,
             conversation_id=conversation_id,
             message_id=message_id,
             status=ExtractionJobStatus.QUEUED,
+            idempotency_key=idempotency_key,
+            payload=payload or {},
         )
         self.session.add(job)
         await self.session.flush()
@@ -234,3 +249,17 @@ class MemoryRepository:
             keyword_weight=keyword_weight,
             limit=limit,
         )
+
+    async def soft_delete_matching(
+        self, user_id: UUID, query: str, *, limit: int = 10
+    ) -> list[Memory]:
+        """Soft-delete active memories matched by an explicit forget command."""
+
+        matches = await self.search_hybrid(user_id, query, limit=limit)
+        deleted: list[Memory] = []
+        for item in matches:
+            item.memory.status = MemoryStatus.DELETED
+            deleted.append(item.memory)
+        if deleted:
+            await self.session.flush()
+        return deleted

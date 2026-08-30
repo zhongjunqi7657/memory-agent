@@ -2,24 +2,21 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
-from decimal import Decimal
 from uuid import UUID
 
 from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
-from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import get_settings
-from app.memory.policy import MemoryCandidate, MemoryDecision, assess_candidate
+from app.memory.policy import MemoryCandidate
+from app.memory.service import MemoryService
 from app.models.qwen import create_chat_model, create_embedding_model
 from app.persistence.models import (
     Memory,
     MemoryKind,
     MemorySensitivity,
-    MemoryStatus,
     Message,
 )
 
@@ -69,10 +66,16 @@ class MemoryExtractor:
                 HumanMessage(content=message.content),
             ]
         )
-        stored: list[Memory] = []
+        stored = []
+        memory_service = MemoryService(
+            self.session,
+            business=self.business,
+            embedding_model=self.embedding_model,
+        )
         for item in result.memories:
-            assessment = assess_candidate(
-                MemoryCandidate(
+            memory = await memory_service.add_candidate(
+                user_id=user_id,
+                candidate=MemoryCandidate(
                     content=item.content,
                     kind=item.kind,
                     confidence=item.confidence,
@@ -80,47 +83,8 @@ class MemoryExtractor:
                     explicit=item.explicit,
                     canonical_key=item.canonical_key,
                 ),
-                config=self.business.memory,
-            )
-            if assessment.decision is MemoryDecision.REJECT:
-                continue
-            if assessment.decision is MemoryDecision.ACTIVE and item.canonical_key:
-                await self._supersede_previous(user_id, item.canonical_key)
-            memory = Memory(
-                user_id=user_id,
-                kind=item.kind,
-                status=(
-                    MemoryStatus.ACTIVE
-                    if assessment.decision is MemoryDecision.ACTIVE
-                    else MemoryStatus.PENDING
-                ),
-                sensitivity=assessment.sensitivity,
-                content=assessment.content,
-                canonical_key=item.canonical_key,
-                confidence=Decimal(str(assessment.confidence)),
                 source_message_id=message.id,
-                valid_from=datetime.now(timezone.utc),
-                metadata_={"reason": assessment.reason},
             )
-            if self.embedding_model:
-                try:
-                    memory.embedding = await self.embedding_model.aembed_query(
-                        assessment.content
-                    )
-                except Exception:  # noqa: BLE001 - keep extraction usable without vectors
-                    memory.embedding = None
-            self.session.add(memory)
-            stored.append(memory)
-        await self.session.flush()
+            if memory:
+                stored.append(memory)
         return stored
-
-    async def _supersede_previous(self, user_id: UUID, canonical_key: str) -> None:
-        previous = await self.session.scalars(
-            select(Memory).where(
-                Memory.user_id == user_id,
-                Memory.canonical_key == canonical_key,
-                Memory.status == MemoryStatus.ACTIVE,
-            )
-        )
-        for memory in previous:
-            memory.status = MemoryStatus.SUPERSEDED
