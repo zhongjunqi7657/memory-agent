@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.memory.retrieval import ScoredMemory, rank_memories
 from app.persistence.models import (
     Conversation,
     ExtractionJob,
@@ -205,13 +206,31 @@ class MemoryRepository:
     async def search_keyword(
         self, user_id: UUID, query: str, *, limit: int
     ) -> list[Memory]:
+        scored = await self.search_hybrid(user_id, query, limit=limit)
+        return [item.memory for item in scored]
+
+    async def search_hybrid(
+        self,
+        user_id: UUID,
+        query: str,
+        *,
+        query_embedding: list[float] | None = None,
+        limit: int,
+        vector_weight: float = 0.7,
+        keyword_weight: float = 0.3,
+    ) -> list[ScoredMemory]:
         statement = (
             select(Memory)
             .where(Memory.user_id == user_id, Memory.status == MemoryStatus.ACTIVE)
             .order_by(Memory.updated_at.desc())
-            .limit(limit)
+            .limit(max(limit * 20, 100))
         )
-        if query.strip():
-            statement = statement.where(Memory.content.ilike(f"%{query.strip()}%"))
         result = await self.session.scalars(statement)
-        return list(result.all())
+        return rank_memories(
+            list(result.all()),
+            query,
+            query_embedding=query_embedding,
+            vector_weight=vector_weight,
+            keyword_weight=keyword_weight,
+            limit=limit,
+        )

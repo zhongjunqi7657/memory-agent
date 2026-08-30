@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.graph import build_graph
 from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import Settings, get_settings
-from app.models.qwen import create_chat_model
+from app.models.qwen import create_chat_model, create_embedding_model
 from app.persistence.models import MessageRole, RunStatus
 from app.persistence.repositories import ConversationRepository, MemoryRepository
 from app.security.redaction import redact_secrets
@@ -31,6 +31,7 @@ class AgentService:
         session: AsyncSession,
         *,
         chat_model=None,
+        embedding_model=None,
         settings: Settings | None = None,
         business: BusinessConfig | None = None,
     ):
@@ -40,6 +41,11 @@ class AgentService:
         self.chat_model = chat_model or create_chat_model(
             settings=self.settings, config=self.business
         )
+        self.embedding_model = embedding_model
+        if self.embedding_model is None and self.settings.dashscope_api_key:
+            self.embedding_model = create_embedding_model(
+                settings=self.settings, config=self.business
+            )
 
     async def chat(
         self,
@@ -99,11 +105,24 @@ class AgentService:
                 )
 
         await emit("run.started", {"conversation_id": str(conversation.id)})
-        memories = await MemoryRepository(self.session).search_keyword(
+        query_embedding = None
+        if self.embedding_model:
+            try:
+                query_embedding = await self.embedding_model.aembed_query(redaction.text)
+                await emit(
+                    "memory.embedding_ready", {"dimensions": len(query_embedding)}
+                )
+            except Exception:  # noqa: BLE001 - retrieval must fall back safely
+                await emit("memory.embedding_fallback")
+        scored_memories = await MemoryRepository(self.session).search_hybrid(
             user.id,
             redaction.text,
+            query_embedding=query_embedding,
             limit=self.business.memory.auto_retrieve_limit,
+            vector_weight=self.business.memory.vector_weight,
+            keyword_weight=self.business.memory.keyword_weight,
         )
+        memories = [item.memory for item in scored_memories]
         memory_context = "\n".join(f"- {memory.content}" for memory in memories)
         await emit("memory.retrieved", {"count": len(memories)})
         recent_messages = await repository.list_recent_messages(

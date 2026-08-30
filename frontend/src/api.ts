@@ -9,6 +9,8 @@ export interface Memory {
   content: string;
   confidence: number;
   canonical_key: string | null;
+  metadata: Record<string, unknown>;
+  source_message_id: string | null;
 }
 
 export interface ChatResponse {

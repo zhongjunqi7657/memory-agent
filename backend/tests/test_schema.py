@@ -1,3 +1,4 @@
+from app.api.memories import MemoryResponse
 from app.persistence import Base
 
 
@@ -22,3 +23,20 @@ def test_initial_schema_contract() -> None:
         constraint.name == "uq_messages_conversation_sequence"
         for constraint in messages.constraints
     )
+
+
+def test_memory_response_reads_the_reserved_metadata_column() -> None:
+    response = MemoryResponse.model_validate(
+        {
+            "id": "b9b4d4c2-125c-4a3f-a9e6-0aa3b9e8df53",
+            "kind": "semantic",
+            "status": "active",
+            "sensitivity": "normal",
+            "content": "喜欢先理解原理再看代码",
+            "confidence": "0.95",
+            "canonical_key": None,
+            "metadata_": {"reason": "明确表达"},
+            "source_message_id": None,
+        }
+    )
+    assert response.metadata["reason"] == "明确表达"

@@ -12,8 +12,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.business import BusinessConfig, get_business_config
+from app.config.settings import get_settings
 from app.memory.policy import MemoryCandidate, MemoryDecision, assess_candidate
-from app.models.qwen import create_chat_model
+from app.models.qwen import create_chat_model, create_embedding_model
 from app.persistence.models import (
     Memory,
     MemoryKind,
@@ -48,12 +49,16 @@ class MemoryExtractor:
         session: AsyncSession,
         *,
         model=None,
+        embedding_model=None,
         business: BusinessConfig | None = None,
     ):
         self.session = session
         self.business = business or get_business_config()
         base_model = model or create_chat_model(config=self.business)
         self.model = base_model.with_structured_output(ExtractionResult)
+        self.embedding_model = embedding_model
+        if self.embedding_model is None and get_settings().dashscope_api_key:
+            self.embedding_model = create_embedding_model(config=self.business)
 
     async def extract_and_store(
         self, *, user_id: UUID, message: Message
@@ -97,6 +102,13 @@ class MemoryExtractor:
                 valid_from=datetime.now(timezone.utc),
                 metadata_={"reason": assessment.reason},
             )
+            if self.embedding_model:
+                try:
+                    memory.embedding = await self.embedding_model.aembed_query(
+                        assessment.content
+                    )
+                except Exception:  # noqa: BLE001 - keep extraction usable without vectors
+                    memory.embedding = None
             self.session.add(memory)
             stored.append(memory)
         await self.session.flush()

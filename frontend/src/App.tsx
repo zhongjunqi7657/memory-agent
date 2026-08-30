@@ -49,6 +49,7 @@ function App() {
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [memories, setMemories] = useState<Memory[]>([]);
   const [isSending, setIsSending] = useState(false);
+  const [liveEvent, setLiveEvent] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [openNotice, setOpenNotice] = useState<string | null>(null);
   const [memoryPanelOpen, setMemoryPanelOpen] = useState(() => window.innerWidth > 680);
@@ -83,7 +84,17 @@ function App() {
     ]);
     setIsSending(true);
     try {
-      const response = await streamChat(content, conversationId);
+      const response = await streamChat(content, conversationId, (event) => {
+        const labels: Record<string, string> = {
+          "run.started": "已创建本次运行",
+          "memory.embedding_ready": "正在理解相关长期记忆",
+          "memory.embedding_fallback": "使用关键词检索长期记忆",
+          "memory.retrieved": "已完成长期记忆检索",
+          "model.completed": "正在整理回答",
+          "memory.extraction_queued": "已排队更新长期记忆",
+        };
+        setLiveEvent(labels[event.event_type] ?? null);
+      });
       setConversationId(response.conversation_id);
       const assistantMessage = {
         id: response.run_id,
@@ -99,6 +110,7 @@ function App() {
       setError(sendError instanceof Error ? sendError.message : "请求失败，请重试");
     } finally {
       setIsSending(false);
+      setLiveEvent(null);
       textareaRef.current?.focus();
     }
   }
@@ -199,7 +211,7 @@ function App() {
             {isSending && (
               <article className="message-row assistant">
                 <div className="assistant-avatar"><Sparkles size={15} /></div>
-                <div className="message-content-wrap"><div className="message-author">Memory Agent</div><div className="typing-indicator"><span /><span /><span /></div></div>
+                <div className="message-content-wrap"><div className="message-author">Memory Agent</div><div className="typing-indicator"><span /><span /><span /><em>{liveEvent ?? "正在思考"}</em></div></div>
               </article>
             )}
           </div>
@@ -240,6 +252,7 @@ function App() {
               <article className="memory-item" key={memory.id}>
                 <div className="memory-item-top"><span className="memory-kind">{formatKind(memory.kind)}</span><span className={`memory-status status-${memory.status}`}>{formatStatus(memory.status)}</span></div>
                 <p>{memory.content}</p>
+                {typeof memory.metadata.reason === "string" && <div className="memory-reason">{memory.metadata.reason}</div>}
                 {memory.status === "pending" && <div className="memory-actions"><button onClick={() => void handleMemoryUpdate(memory.id, "active")}><Check size={14} />确认</button><button onClick={() => void handleMemoryUpdate(memory.id, "deleted")}><Trash2 size={14} />删除</button></div>}
                 {memory.status === "active" && <button className="memory-delete" aria-label="删除记忆" onClick={() => void handleMemoryUpdate(memory.id, "deleted")}><Trash2 size={14} /></button>}
               </article>

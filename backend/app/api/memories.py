@@ -24,6 +24,8 @@ class MemoryResponse(BaseModel):
     content: str
     confidence: float
     canonical_key: str | None
+    metadata: dict[str, object] = Field(validation_alias="metadata_")
+    source_message_id: UUID | None
 
 
 class MemoryStatusRequest(BaseModel):
