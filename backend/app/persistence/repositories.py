@@ -16,6 +16,7 @@ from app.persistence.models import (
     Message,
     MessageRole,
     Run,
+    RunEvent,
     RunStatus,
     User,
 )
@@ -114,6 +115,46 @@ class ConversationRepository:
 
         run.finished_at = datetime.now(timezone.utc)
         await self.session.flush()
+
+    async def add_run_event(
+        self,
+        run_id: UUID,
+        *,
+        sequence: int,
+        event_type: str,
+        payload: dict,
+    ) -> RunEvent:
+        event = RunEvent(
+            run_id=run_id,
+            sequence=sequence,
+            event_type=event_type,
+            payload=payload,
+        )
+        self.session.add(event)
+        await self.session.flush()
+        return event
+
+    async def list_run_events(
+        self,
+        run_id: UUID,
+        user_id: UUID,
+        *,
+        after_sequence: int = 0,
+        limit: int = 100,
+    ) -> list[RunEvent]:
+        result = await self.session.scalars(
+            select(RunEvent)
+            .join(Run, Run.id == RunEvent.run_id)
+            .join(Conversation, Conversation.id == Run.conversation_id)
+            .where(
+                RunEvent.run_id == run_id,
+                Conversation.user_id == user_id,
+                RunEvent.sequence > after_sequence,
+            )
+            .order_by(RunEvent.sequence)
+            .limit(limit)
+        )
+        return list(result.all())
 
     async def queue_extraction_job(
         self, user_id: UUID, conversation_id: UUID, message_id: UUID

@@ -15,7 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { fetchMemories, sendChat, updateMemory } from "./api";
+import { fetchMemories, streamChat, updateMemory } from "./api";
 import type { Memory } from "./api";
 
 type ChatMessage = {
@@ -83,7 +83,7 @@ function App() {
     ]);
     setIsSending(true);
     try {
-      const response = await sendChat(content, conversationId);
+      const response = await streamChat(content, conversationId);
       setConversationId(response.conversation_id);
       const assistantMessage = {
         id: response.run_id,

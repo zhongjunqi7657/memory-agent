@@ -75,4 +75,4 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
 curl "http://127.0.0.1:8000/v1/memories?user_key=demo-user"
 ```
 
-聊天请求会先在本机脱敏，再写入消息并排队记忆提取任务；API 响应中的 `redacted` 和 `redaction_categories` 可直接用于前端的折叠提示。记忆候选由 Worker 通过结构化输出提取，普通明确信息自动生效，敏感/推断信息进入 `pending`，秘密直接丢弃。
+聊天请求会先在本机脱敏，再写入消息并排队记忆提取任务；前端通过 `POST /v1/chat/stream` 消费 SSE 运行事件，最终事件携带回答和 `redacted` 元数据，可直接用于折叠提示。记忆候选由 Worker 通过结构化输出提取，普通明确信息自动生效，敏感/推断信息进入 `pending`，秘密直接丢弃。

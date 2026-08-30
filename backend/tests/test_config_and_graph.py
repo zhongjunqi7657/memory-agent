@@ -5,6 +5,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 
 from app.agent.graph import build_graph
+from app.api.chat import format_sse
 from app.config.business import BusinessConfig
 
 
@@ -34,3 +35,12 @@ def test_graph_returns_model_message() -> None:
     graph = build_graph(FixedChatModel())
     result = graph.invoke({"messages": [HumanMessage(content="我想学 Python")]})
     assert result["messages"][-1].content == "收到，我会记住你的学习目标。"
+
+
+def test_format_sse_keeps_structured_event_data() -> None:
+    encoded = format_sse(
+        {"event_type": "memory.retrieved", "sequence": 2, "payload": {"count": 3}}
+    )
+    assert encoded.startswith("event: memory.retrieved\n")
+    assert '"count": 3' in encoded
+    assert encoded.endswith("\n\n")

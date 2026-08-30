@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from uuid import UUID
 
@@ -21,6 +22,9 @@ class AgentInputError(ValueError):
     """Raised when a chat request violates a user-visible input limit."""
 
 
+EventSink = Callable[[dict[str, object]], Awaitable[None]]
+
+
 class AgentService:
     def __init__(
         self,
@@ -38,7 +42,12 @@ class AgentService:
         )
 
     async def chat(
-        self, *, user_key: str, content: str, conversation_id: UUID | None = None
+        self,
+        *,
+        user_key: str,
+        content: str,
+        conversation_id: UUID | None = None,
+        event_sink: EventSink | None = None,
     ) -> dict[str, object]:
         if not content.strip():
             raise AgentInputError("消息不能为空")
@@ -65,12 +74,38 @@ class AgentService:
             is_redacted=redaction.redacted,
         )
         run = await repository.create_run(conversation.id)
+        event_sequence = 0
+
+        async def emit(
+            event_type: str, payload: dict[str, object] | None = None
+        ) -> None:
+            nonlocal event_sequence
+            event_sequence += 1
+            event_payload = payload or {}
+            await repository.add_run_event(
+                run.id,
+                sequence=event_sequence,
+                event_type=event_type,
+                payload=event_payload,
+            )
+            if event_sink:
+                await event_sink(
+                    {
+                        "run_id": str(run.id),
+                        "sequence": event_sequence,
+                        "event_type": event_type,
+                        "payload": event_payload,
+                    }
+                )
+
+        await emit("run.started", {"conversation_id": str(conversation.id)})
         memories = await MemoryRepository(self.session).search_keyword(
             user.id,
             redaction.text,
             limit=self.business.memory.auto_retrieve_limit,
         )
         memory_context = "\n".join(f"- {memory.content}" for memory in memories)
+        await emit("memory.retrieved", {"count": len(memories)})
         recent_messages = await repository.list_recent_messages(
             conversation.id, self.business.agent.recent_turns
         )
@@ -86,6 +121,7 @@ class AgentService:
                 {"messages": graph_messages, "memory_context": memory_context}
             )
             answer = str(result["messages"][-1].content)
+            await emit("model.completed", {"answer_length": len(answer)})
             assistant_sequence = await repository.next_message_sequence(conversation.id)
             await repository.add_message(
                 conversation.id,
@@ -96,12 +132,26 @@ class AgentService:
             await repository.queue_extraction_job(
                 user.id, conversation.id, user_message.id
             )
+            await emit("memory.extraction_queued")
             await repository.finish_run(run, status=RunStatus.COMPLETED)
+            await emit(
+                "run.completed",
+                {
+                    "conversation_id": str(conversation.id),
+                    "run_id": str(run.id),
+                    "message": answer,
+                    "redacted": redaction.redacted,
+                    "redaction_categories": list(redaction.categories),
+                    "memory_count": len(memories),
+                },
+            )
             await self.session.commit()
         except Exception as error:
+            safe_error = redact_secrets(str(error)).text[:500]
             await repository.finish_run(
-                run, status=RunStatus.FAILED, error_message=str(error)[:500]
+                run, status=RunStatus.FAILED, error_message=safe_error
             )
+            await emit("run.failed", {"message": "模型运行失败"})
             await self.session.commit()
             raise
 
