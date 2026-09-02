@@ -23,6 +23,7 @@ from sqlalchemy import (
     UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -30,6 +31,10 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.persistence.base import Base, TimestampMixin
 
 JSON_TYPE = JSONB().with_variant(JSON(), "sqlite")
+
+
+def _enum_values(enum_class: type[enum.Enum]) -> list[str]:
+    return [str(member.value) for member in enum_class]
 
 
 class MessageRole(str, enum.Enum):
@@ -120,7 +125,8 @@ class Message(TimestampMixin, Base):
         ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
     role: Mapped[MessageRole] = mapped_column(
-        Enum(MessageRole, name="message_role"), nullable=False
+        Enum(MessageRole, name="message_role", values_callable=_enum_values),
+        nullable=False,
     )
     content: Mapped[str] = mapped_column(Text, nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -143,7 +149,9 @@ class Run(TimestampMixin, Base):
         ForeignKey("conversations.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[RunStatus] = mapped_column(
-        Enum(RunStatus, name="run_status"), default=RunStatus.QUEUED, nullable=False
+        Enum(RunStatus, name="run_status", values_callable=_enum_values),
+        default=RunStatus.QUEUED,
+        nullable=False,
     )
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -183,6 +191,13 @@ class Memory(TimestampMixin, Base):
     __table_args__ = (
         Index("ix_memories_user_status", "user_id", "status"),
         Index("ix_memories_user_kind", "user_id", "kind"),
+        Index(
+            "ix_memories_embedding_hnsw",
+            "embedding",
+            postgresql_using="hnsw",
+            postgresql_ops={"embedding": "vector_cosine_ops"},
+            postgresql_where=text("embedding IS NOT NULL"),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -190,15 +205,20 @@ class Memory(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     kind: Mapped[MemoryKind] = mapped_column(
-        Enum(MemoryKind, name="memory_kind"), nullable=False
+        Enum(MemoryKind, name="memory_kind", values_callable=_enum_values),
+        nullable=False,
     )
     status: Mapped[MemoryStatus] = mapped_column(
-        Enum(MemoryStatus, name="memory_status"),
+        Enum(MemoryStatus, name="memory_status", values_callable=_enum_values),
         default=MemoryStatus.PENDING,
         nullable=False,
     )
     sensitivity: Mapped[MemorySensitivity] = mapped_column(
-        Enum(MemorySensitivity, name="memory_sensitivity"),
+        Enum(
+            MemorySensitivity,
+            name="memory_sensitivity",
+            values_callable=_enum_values,
+        ),
         default=MemorySensitivity.NORMAL,
         nullable=False,
     )
@@ -247,7 +267,11 @@ class ExtractionJob(TimestampMixin, Base):
         ForeignKey("messages.id", ondelete="CASCADE"), nullable=False
     )
     status: Mapped[ExtractionJobStatus] = mapped_column(
-        Enum(ExtractionJobStatus, name="extraction_job_status"),
+        Enum(
+            ExtractionJobStatus,
+            name="extraction_job_status",
+            values_callable=_enum_values,
+        ),
         default=ExtractionJobStatus.QUEUED,
         nullable=False,
     )

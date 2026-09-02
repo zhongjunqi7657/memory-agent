@@ -3,6 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
+from contextlib import suppress
 from typing import Annotated
 from uuid import UUID
 
@@ -62,36 +63,44 @@ async def chat_stream(
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> StreamingResponse:
     async def event_generator() -> AsyncIterator[str]:
-        queue: asyncio.Queue[dict[str, object]] = asyncio.Queue()
+        queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
 
         async def publish(event: dict[str, object]) -> None:
             await queue.put(event)
 
-        task = asyncio.create_task(
-            AgentService(session).chat(
-                user_key=request.user_key,
-                content=request.content,
-                conversation_id=request.conversation_id,
-                event_sink=publish,
-            )
-        )
+        async def run_agent() -> None:
+            try:
+                await AgentService(session).chat(
+                    user_key=request.user_key,
+                    content=request.content,
+                    conversation_id=request.conversation_id,
+                    event_sink=publish,
+                )
+            finally:
+                await queue.put(None)
+
+        task = asyncio.create_task(run_agent())
         try:
             while True:
-                if task.done() and queue.empty():
-                    break
                 try:
                     event = await asyncio.wait_for(queue.get(), timeout=15)
                 except asyncio.TimeoutError:
                     yield ": keep-alive\n\n"
                     continue
+                if event is None:
+                    break
                 yield format_sse(event)
-            if task.exception():
+            try:
+                await task
+            except Exception:  # noqa: BLE001 - return a safe SSE error event
                 yield format_sse(
                     {"event_type": "error", "payload": {"message": "请求处理失败"}}
                 )
         finally:
             if not task.done():
                 task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await task
 
     return StreamingResponse(
         event_generator(),

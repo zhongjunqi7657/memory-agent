@@ -17,6 +17,7 @@ def test_initial_schema_contract() -> None:
     assert memories.c.embedding.type.dim == 1024
     assert memories.c.user_id.nullable is False
     assert memories.c.content.nullable is False
+    assert "ix_memories_embedding_hnsw" in {index.name for index in memories.indexes}
 
     messages = Base.metadata.tables["messages"]
     assert any(

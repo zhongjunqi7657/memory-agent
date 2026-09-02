@@ -40,9 +40,7 @@ class AgentService:
         self.session = session
         self.settings = settings or get_settings()
         self.business = business or get_business_config()
-        self.chat_model = chat_model or create_chat_model(
-            settings=self.settings, config=self.business
-        )
+        self.chat_model = chat_model
         self.embedding_model = embedding_model
         if self.embedding_model is None and self.settings.dashscope_api_key:
             self.embedding_model = create_embedding_model(
@@ -275,7 +273,10 @@ class AgentService:
         ]
 
         try:
-            result = await build_graph(self.chat_model).ainvoke(
+            chat_model = self.chat_model or create_chat_model(
+                settings=self.settings, config=self.business
+            )
+            result = await build_graph(chat_model).ainvoke(
                 {"messages": graph_messages, "memory_context": memory_context}
             )
             answer = str(result["messages"][-1].content)

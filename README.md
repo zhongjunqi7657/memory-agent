@@ -52,7 +52,7 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-首版主链路已完成：数据库模型与迁移、千问适配器、LangGraph 对话闭环、混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。Worker 具备租约、幂等键、失败重试和超时任务重新领取字段。真实 PostgreSQL/pgvector 集成仍需要 Docker Desktop 的 Linux 引擎可用。
+首版主链路已完成：数据库模型与迁移、千问适配器、LangGraph 对话闭环、混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。Worker 具备租约、幂等键、失败重试和超时任务重新领取字段。PostgreSQL 16 + pgvector 0.8.6 的迁移、向量读写、Worker 跳锁抢占、SSE 事件重放和跨会话记忆召回已经过真实数据库集成测试。
 
 ## 本地运行
 
@@ -64,6 +64,28 @@ docs/                     Architecture and interview notes
 6. 单独启动记忆 Worker：`uv run python -m app.jobs.worker`。
 
 另开一个终端启动前端：`cd frontend; npm install; npm run dev`，然后访问 `http://localhost:5173`。前端会将 `/v1` 请求代理到 FastAPI；也可以通过 `VITE_API_BASE_URL` 指向已部署的 API。
+
+### 测试
+
+常规测试不调用真实模型；没有配置测试库时，PostgreSQL 集成用例会自动跳过：
+
+```powershell
+cd backend
+uv run ruff check app tests alembic
+uv run pytest -q
+```
+
+首次执行真实数据库集成测试时，创建名称以 `_test` 结尾的隔离数据库并迁移。下面的密码应与本机 `.env` 保持一致：
+
+```powershell
+docker exec memory-agent-demo-postgres-1 createdb -U memory_agent memory_agent_test
+$env:DATABASE_URL='postgresql+asyncpg://memory_agent:replace-me@localhost:5432/memory_agent_test'
+uv run alembic upgrade head
+$env:TEST_DATABASE_URL=$env:DATABASE_URL
+uv run pytest tests/test_postgres_integration.py -q
+```
+
+集成测试会拒绝连接名称不以 `_test` 结尾的数据库，避免清理测试数据时误碰开发库。
 
 ### API 示例
 
