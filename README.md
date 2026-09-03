@@ -52,7 +52,7 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-首版主链路已完成：数据库模型与迁移、千问适配器、LangGraph 对话闭环、混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。Worker 具备租约、幂等键、失败重试和超时任务重新领取字段。PostgreSQL 16 + pgvector 0.8.6 的迁移、向量读写、Worker 跳锁抢占、SSE 事件重放和跨会话记忆召回已经过真实数据库集成测试。
+首版主链路已完成：数据库模型与迁移、千问适配器、LangGraph 对话闭环、混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。Worker 具备租约、幂等键、失败重试和超时任务重新领取字段。PostgreSQL 16 + pgvector 0.8.6 的迁移、向量读写、Worker 跳锁抢占、SSE 事件重放和跨会话记忆召回已经过真实数据库集成测试；千问 `qwen-plus` 对话、结构化记忆提取及 `text-embedding-v3` 1024 维向量链路已经过真实 API 联调。
 
 ## 本地运行
 

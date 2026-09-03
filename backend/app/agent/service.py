@@ -25,6 +25,7 @@ class AgentInputError(ValueError):
 
 
 EventSink = Callable[[dict[str, object]], Awaitable[None]]
+_AUTO_EMBEDDING = object()
 
 
 class AgentService:
@@ -33,7 +34,7 @@ class AgentService:
         session: AsyncSession,
         *,
         chat_model=None,
-        embedding_model=None,
+        embedding_model=_AUTO_EMBEDDING,
         settings: Settings | None = None,
         business: BusinessConfig | None = None,
     ):
@@ -41,11 +42,13 @@ class AgentService:
         self.settings = settings or get_settings()
         self.business = business or get_business_config()
         self.chat_model = chat_model
-        self.embedding_model = embedding_model
-        if self.embedding_model is None and self.settings.dashscope_api_key:
+        self.embedding_model = None
+        if embedding_model is _AUTO_EMBEDDING and self.settings.dashscope_api_key:
             self.embedding_model = create_embedding_model(
                 settings=self.settings, config=self.business
             )
+        elif embedding_model is not _AUTO_EMBEDDING:
+            self.embedding_model = embedding_model
 
     async def chat(
         self,

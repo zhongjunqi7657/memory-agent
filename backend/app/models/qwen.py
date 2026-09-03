@@ -35,4 +35,5 @@ def create_embedding_model(
         base_url=runtime.dashscope_base_url,
         model=business.models.embedding_model,
         dimensions=business.models.embedding_dimensions,
+        check_embedding_ctx_length=False,
     )

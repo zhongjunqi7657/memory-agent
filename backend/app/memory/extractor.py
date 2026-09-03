@@ -38,6 +38,7 @@ EXTRACTION_PROMPT = """你负责从用户消息中提取可长期复用的事实
 只提取用户明确表达或有清晰证据的内容，不提取助手内容、一次性闲聊和任何密码、API key、token。
 content 用简洁中文陈述；kind 只能是 semantic（稳定偏好、目标、自我描述）或 episodic（带时间的经历）。
 不确定或敏感内容保留候选并降低 confidence，由代码决定是否需要用户确认；没有候选时返回空 memories。"""
+_AUTO_EMBEDDING = object()
 
 
 class MemoryExtractor:
@@ -46,16 +47,18 @@ class MemoryExtractor:
         session: AsyncSession,
         *,
         model=None,
-        embedding_model=None,
+        embedding_model=_AUTO_EMBEDDING,
         business: BusinessConfig | None = None,
     ):
         self.session = session
         self.business = business or get_business_config()
         base_model = model or create_chat_model(config=self.business)
         self.model = base_model.with_structured_output(ExtractionResult)
-        self.embedding_model = embedding_model
-        if self.embedding_model is None and get_settings().dashscope_api_key:
+        self.embedding_model = None
+        if embedding_model is _AUTO_EMBEDDING and get_settings().dashscope_api_key:
             self.embedding_model = create_embedding_model(config=self.business)
+        elif embedding_model is not _AUTO_EMBEDDING:
+            self.embedding_model = embedding_model
 
     async def extract_and_store(
         self, *, user_id: UUID, message: Message
