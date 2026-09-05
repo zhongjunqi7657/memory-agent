@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.chat import router as chat_router
+from app.api.conversations import router as conversations_router
 from app.api.memories import router as memories_router
 from app.api.runs import router as runs_router
 from app.config.settings import get_settings
@@ -21,9 +22,10 @@ app.add_middleware(
     ],
     allow_credentials=False,
     allow_methods=["GET", "POST", "PATCH"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "Authorization"],
 )
 app.include_router(chat_router)
+app.include_router(conversations_router)
 app.include_router(memories_router)
 app.include_router(runs_router)
 

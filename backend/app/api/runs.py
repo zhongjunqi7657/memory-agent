@@ -9,8 +9,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.persistence.db import get_session
 from app.persistence.repositories import ConversationRepository
+from app.security.auth import require_demo_auth
 
-router = APIRouter(prefix="/v1", tags=["runs"])
+router = APIRouter(
+    prefix="/v1", tags=["runs"], dependencies=[Depends(require_demo_auth)]
+)
 
 
 class RunEventResponse(BaseModel):

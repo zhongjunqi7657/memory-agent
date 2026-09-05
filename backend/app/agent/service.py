@@ -72,7 +72,9 @@ class AgentService:
             if conversation is None:
                 raise AgentInputError("会话不存在或不属于当前用户")
         if conversation is None:
-            conversation = await repository.create_conversation(user.id)
+            conversation = await repository.create_conversation(
+                user.id, title=redaction.text.strip()[:60]
+            )
 
         sequence = await repository.next_message_sequence(conversation.id)
         user_message = await repository.add_message(
@@ -264,7 +266,24 @@ class AgentService:
         )
         memories = [item.memory for item in scored_memories]
         memory_context = "\n".join(f"- {memory.content}" for memory in memories)
-        await emit("memory.retrieved", {"count": len(memories)})
+        await emit(
+            "memory.retrieved",
+            {
+                "count": len(memories),
+                "memories": [
+                    {
+                        "id": str(item.memory.id),
+                        "content": item.memory.content,
+                        "kind": item.memory.kind.value,
+                        "score": round(item.score, 4),
+                        "keyword_score": round(item.keyword_score, 4),
+                        "vector_score": round(item.vector_score, 4),
+                        "reason": item.reason,
+                    }
+                    for item in scored_memories
+                ],
+            },
+        )
         recent_messages = await repository.list_recent_messages(
             conversation.id, self.business.agent.recent_turns
         )

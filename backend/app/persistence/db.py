@@ -21,6 +21,12 @@ engine = create_engine()
 SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
 
 
+def get_session_factory() -> async_sessionmaker[AsyncSession]:
+    """Expose the factory for work that must outlive an HTTP response."""
+
+    return SessionFactory
+
+
 async def get_session() -> AsyncIterator[AsyncSession]:
     async with SessionFactory() as session:
         yield session

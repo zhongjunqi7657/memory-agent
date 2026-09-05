@@ -39,6 +39,8 @@ class AgentConfig(BaseModel):
 class SecurityConfig(BaseModel):
     max_input_chars: int = Field(default=4000, ge=100)
     secret_redaction_enabled: bool = True
+    rate_limit_per_minute: int = Field(default=20, ge=1, le=600)
+    daily_token_budget: int = Field(default=20000, ge=100, le=10_000_000)
 
 
 class BusinessConfig(BaseModel):

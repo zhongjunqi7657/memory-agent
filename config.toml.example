@@ -22,3 +22,5 @@ max_tool_rounds = 4
 [security]
 max_input_chars = 4000
 secret_redaction_enabled = true
+rate_limit_per_minute = 20
+daily_token_budget = 20000

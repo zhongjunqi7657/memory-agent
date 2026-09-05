@@ -60,6 +60,19 @@ def test_inferred_memory_waits_for_confirmation() -> None:
     assert assessment.decision is MemoryDecision.PENDING
 
 
+def test_uncertain_wording_waits_even_when_model_marks_it_explicit() -> None:
+    assessment = assess_candidate(
+        MemoryCandidate(
+            content="用户可能更适合晨间学习",
+            kind=MemoryKind.SEMANTIC,
+            confidence=0.95,
+            explicit=True,
+        )
+    )
+
+    assert assessment.decision is MemoryDecision.PENDING
+
+
 def test_sensitive_memory_waits_for_confirmation() -> None:
     assessment = assess_candidate(
         MemoryCandidate(
@@ -79,6 +92,18 @@ def test_local_sensitive_classifier_overrides_model_normal_label() -> None:
             content="我的健康状况需要保密",
             kind=MemoryKind.SEMANTIC,
             confidence=0.99,
+        )
+    )
+
+    assert assessment.decision is MemoryDecision.PENDING
+
+
+def test_student_loan_is_classified_as_sensitive_financial_information() -> None:
+    assessment = assess_candidate(
+        MemoryCandidate(
+            content="用户目前有一笔助学贷款",
+            kind=MemoryKind.SEMANTIC,
+            confidence=0.95,
         )
     )
 

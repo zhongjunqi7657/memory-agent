@@ -10,8 +10,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.persistence.db import get_session
 from app.persistence.models import MemoryKind, MemorySensitivity, MemoryStatus
 from app.persistence.repositories import ConversationRepository, MemoryRepository
+from app.security.auth import require_demo_auth
 
-router = APIRouter(prefix="/v1", tags=["memory"])
+router = APIRouter(
+    prefix="/v1", tags=["memory"], dependencies=[Depends(require_demo_auth)]
+)
 
 
 class MemoryResponse(BaseModel):
@@ -29,7 +32,7 @@ class MemoryResponse(BaseModel):
 
 
 class MemoryStatusRequest(BaseModel):
-    status: MemoryStatus = Field(description="active、pending 或 deleted")
+    status: MemoryStatus = Field(description="active、pending、rejected 或 deleted")
 
 
 @router.get("/memories", response_model=list[MemoryResponse])
@@ -59,6 +62,7 @@ async def update_memory(
         MemoryStatus.ACTIVE,
         MemoryStatus.PENDING,
         MemoryStatus.DELETED,
+        MemoryStatus.REJECTED,
     }:
         raise HTTPException(status_code=400, detail="不支持的记忆状态")
     user = await ConversationRepository(session).get_user(user_key)

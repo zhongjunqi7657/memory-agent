@@ -1,0 +1,339 @@
+{
+  "version": "2026-09-03-v1",
+  "extraction_cases": [
+    {
+      "id": "extract-fact-01",
+      "category": "fact",
+      "message": "我计划在两个月内完成长期记忆 Agent 项目。",
+      "expected": [{"keywords": ["两个月", "Agent"], "kind": "semantic"}]
+    },
+    {
+      "id": "extract-fact-02",
+      "category": "fact",
+      "message": "我喜欢先理解原理，再动手写代码。",
+      "expected": [{"keywords": ["理解原理", "写代码"], "kind": "semantic"}]
+    },
+    {
+      "id": "extract-fact-03",
+      "category": "fact",
+      "message": "我叫林舟，目前是一名前端开发者。",
+      "expected": [
+        {"keywords": ["林舟"], "kind": "semantic"},
+        {"keywords": ["前端"], "kind": "semantic"}
+      ]
+    },
+    {
+      "id": "extract-fact-04",
+      "category": "fact",
+      "message": "昨天我第一次独立完成了 PostgreSQL 数据迁移。",
+      "expected": [{"keywords": ["PostgreSQL", "数据迁移"], "kind": "episodic"}]
+    },
+    {
+      "id": "extract-fact-05",
+      "category": "fact",
+      "message": "我的长期目标是成为能够独立负责 Agent 系统的后端工程师。",
+      "expected": [{"keywords": ["Agent", "后端工程师"], "kind": "semantic"}]
+    },
+    {
+      "id": "extract-fact-06",
+      "category": "fact",
+      "message": "我每周日晚上会复盘本周的学习进度。",
+      "expected": [{"keywords": ["周日", "复盘"], "kind": "semantic"}]
+    },
+    {
+      "id": "extract-irrelevant-01",
+      "category": "irrelevant",
+      "message": "今天天气不错。",
+      "expected": []
+    },
+    {
+      "id": "extract-irrelevant-02",
+      "category": "irrelevant",
+      "message": "请解释一下什么是向量数据库。",
+      "expected": []
+    },
+    {
+      "id": "extract-irrelevant-03",
+      "category": "irrelevant",
+      "message": "午饭吃了面，味道还行。",
+      "expected": []
+    },
+    {
+      "id": "extract-inference-01",
+      "category": "inference",
+      "message": "最近总在早上问问题，也许我更适合晨间学习吧。",
+      "expected": [{"keywords": ["晨间学习"], "kind": "semantic", "decision": "pending"}]
+    },
+    {
+      "id": "extract-inference-02",
+      "category": "inference",
+      "message": "这道题没做出来，可能说明我不擅长算法。",
+      "expected": [{"keywords": ["不擅长算法"], "kind": "semantic", "decision": "pending"}]
+    },
+    {
+      "id": "extract-sensitive-01",
+      "category": "sensitive",
+      "message": "我的健康状况最近需要定期复查。",
+      "expected": [{"keywords": ["健康", "复查"], "kind": "semantic", "decision": "pending"}]
+    },
+    {
+      "id": "extract-sensitive-02",
+      "category": "sensitive",
+      "message": "我的 API Key 是 sk-demo-value-1234567890，请帮我记住。",
+      "expected": []
+    },
+    {
+      "id": "extract-sensitive-03",
+      "category": "sensitive",
+      "message": "我目前有一笔助学贷款，暂时不希望把金额记下来。",
+      "expected": [{"keywords": ["助学贷款"], "kind": "semantic", "decision": "pending"}]
+    }
+  ],
+  "retrieval_cases": [
+    {
+      "id": "recall-01",
+      "category": "recall",
+      "query": "按我的学习习惯给建议",
+      "memories": [
+        {"id": "r1-target", "content": "用户喜欢先理解原理再写代码", "embedding": [1.0, 0.0]},
+        {"id": "r1-noise", "content": "用户周末喜欢摄影", "embedding": [0.0, 1.0]}
+      ],
+      "expected_ids": ["r1-target"],
+      "query_embedding": [1.0, 0.0],
+      "limit": 1
+    },
+    {
+      "id": "recall-02",
+      "category": "recall",
+      "query": "Agent 项目下一步做什么",
+      "memories": [
+        {"id": "r2-target", "content": "用户计划两个月内完成 Agent 项目"},
+        {"id": "r2-noise", "content": "用户喜欢阅读历史书"}
+      ],
+      "expected_ids": ["r2-target"],
+      "limit": 1
+    },
+    {
+      "id": "recall-03",
+      "category": "recall",
+      "query": "帮我安排周日晚上",
+      "memories": [
+        {"id": "r3-target", "content": "用户每周日晚上复盘学习进度"},
+        {"id": "r3-noise", "content": "用户工作日乘地铁通勤"}
+      ],
+      "expected_ids": ["r3-target"],
+      "limit": 1
+    },
+    {
+      "id": "recall-04",
+      "category": "recall",
+      "query": "数据库迁移经验",
+      "memories": [
+        {"id": "r4-target", "content": "用户独立完成过 PostgreSQL 数据迁移", "embedding": [0.9, 0.1]},
+        {"id": "r4-noise", "content": "用户正在学习 React", "embedding": [0.1, 0.9]}
+      ],
+      "expected_ids": ["r4-target"],
+      "query_embedding": [1.0, 0.0],
+      "limit": 1
+    },
+    {
+      "id": "recall-05",
+      "category": "recall",
+      "query": "我未来想做什么工作",
+      "memories": [
+        {"id": "r5-target", "content": "用户的长期目标是成为 Agent 后端工程师", "embedding": [1.0, 0.0]},
+        {"id": "r5-noise", "content": "用户今天午饭吃了面", "embedding": [0.0, 1.0]}
+      ],
+      "expected_ids": ["r5-target"],
+      "query_embedding": [1.0, 0.0],
+      "limit": 1
+    },
+    {
+      "id": "recall-06",
+      "category": "recall",
+      "query": "前端学习路线",
+      "memories": [
+        {"id": "r6-target", "content": "用户目前是一名前端开发者"},
+        {"id": "r6-noise", "content": "用户计划学习烘焙"}
+      ],
+      "expected_ids": ["r6-target"],
+      "limit": 1
+    },
+    {
+      "id": "recall-07",
+      "category": "recall",
+      "query": "我叫什么名字",
+      "memories": [
+        {"id": "r7-target", "content": "用户的名字是林舟"},
+        {"id": "r7-noise", "content": "用户喜欢林间徒步"}
+      ],
+      "expected_ids": ["r7-target"],
+      "limit": 1
+    },
+    {
+      "id": "recall-08",
+      "category": "recall",
+      "query": "摄影器材怎么选",
+      "memories": [
+        {"id": "r8-target", "content": "用户周末喜欢街头摄影"},
+        {"id": "r8-noise", "content": "用户在学习数据库"}
+      ],
+      "expected_ids": ["r8-target"],
+      "limit": 1
+    },
+    {
+      "id": "recall-09",
+      "category": "recall",
+      "query": "怎样提高专注力",
+      "memories": [
+        {"id": "r9-target", "content": "用户习惯使用番茄工作法"},
+        {"id": "r9-noise", "content": "用户喜欢喝无糖咖啡"}
+      ],
+      "expected_ids": ["r9-target"],
+      "limit": 1
+    },
+    {
+      "id": "recall-10",
+      "category": "recall",
+      "query": "最近的阶段成果是什么",
+      "memories": [
+        {"id": "r10-target", "content": "用户上周完成了长期记忆 Agent 最小闭环"},
+        {"id": "r10-noise", "content": "用户喜欢先看文档"}
+      ],
+      "expected_ids": ["r10-target"],
+      "limit": 1
+    },
+    {
+      "id": "conflict-01",
+      "category": "conflict",
+      "query": "我不准备考研了，改为参加秋招",
+      "memories": [
+        {"id": "c1-old", "content": "用户准备考研"},
+        {"id": "c1-noise", "content": "用户喜欢摄影"}
+      ],
+      "expected_ids": ["c1-old"],
+      "limit": 1
+    },
+    {
+      "id": "conflict-02",
+      "category": "conflict",
+      "query": "我现在改用 TypeScript，不再用 JavaScript",
+      "memories": [
+        {"id": "c2-old", "content": "用户主要使用 JavaScript 开发"},
+        {"id": "c2-noise", "content": "用户计划学习数据库"}
+      ],
+      "expected_ids": ["c2-old"],
+      "limit": 1
+    },
+    {
+      "id": "conflict-03",
+      "category": "conflict",
+      "query": "我已经搬到上海生活了",
+      "memories": [
+        {"id": "c3-old", "content": "用户目前住在北京"},
+        {"id": "c3-noise", "content": "用户喜欢读科幻小说"}
+      ],
+      "expected_ids": ["c3-old"],
+      "limit": 1
+    },
+    {
+      "id": "conflict-04",
+      "category": "conflict",
+      "query": "我现在不喝咖啡了",
+      "memories": [
+        {"id": "c4-old", "content": "用户每天喝两杯咖啡"},
+        {"id": "c4-noise", "content": "用户每周跑步三次"}
+      ],
+      "expected_ids": ["c4-old"],
+      "limit": 1
+    },
+    {
+      "id": "conflict-05",
+      "category": "conflict",
+      "query": "我把学习时间从早上改到晚上",
+      "memories": [
+        {"id": "c5-old", "content": "用户习惯每天早上学习"},
+        {"id": "c5-noise", "content": "用户喜欢写学习笔记"}
+      ],
+      "expected_ids": ["c5-old"],
+      "limit": 1
+    },
+    {
+      "id": "deletion-01",
+      "category": "deletion",
+      "query": "考研计划",
+      "memories": [
+        {"id": "d1-deleted", "content": "用户准备考研", "status": "deleted"},
+        {"id": "d1-noise", "content": "用户正在学习前端"}
+      ],
+      "expected_ids": [],
+      "deleted_ids": ["d1-deleted"]
+    },
+    {
+      "id": "deletion-02",
+      "category": "deletion",
+      "query": "咖啡偏好",
+      "memories": [
+        {"id": "d2-deleted", "content": "用户喜欢无糖咖啡", "status": "deleted"},
+        {"id": "d2-pending", "content": "用户可能喜欢红茶", "status": "pending"}
+      ],
+      "expected_ids": [],
+      "deleted_ids": ["d2-deleted"]
+    },
+    {
+      "id": "deletion-03",
+      "category": "deletion",
+      "query": "旧工作经历",
+      "memories": [
+        {"id": "d3-deleted", "content": "用户曾在旧公司负责测试", "status": "deleted"},
+        {"id": "d3-superseded", "content": "用户曾是测试工程师", "status": "superseded"}
+      ],
+      "expected_ids": [],
+      "deleted_ids": ["d3-deleted"]
+    },
+    {
+      "id": "deletion-04",
+      "category": "deletion",
+      "query": "住址信息",
+      "memories": [
+        {"id": "d4-deleted", "content": "用户住在北京", "status": "deleted"},
+        {"id": "d4-active", "content": "用户关注隐私保护", "status": "active"}
+      ],
+      "expected_ids": [],
+      "deleted_ids": ["d4-deleted"]
+    },
+    {
+      "id": "isolation-01",
+      "category": "isolation",
+      "query": "我的 Agent 项目",
+      "memories": [
+        {"id": "i1-target", "content": "用户计划完成 Agent 项目", "owner": "target"},
+        {"id": "i1-foreign", "content": "用户的 Agent 项目已经上线", "owner": "other"}
+      ],
+      "expected_ids": ["i1-target"],
+      "limit": 2
+    },
+    {
+      "id": "isolation-02",
+      "category": "isolation",
+      "query": "我的学习偏好",
+      "memories": [
+        {"id": "i2-target", "content": "用户喜欢通过实例学习", "owner": "target"},
+        {"id": "i2-foreign", "content": "用户喜欢通过视频学习", "owner": "other"}
+      ],
+      "expected_ids": ["i2-target"],
+      "limit": 2
+    },
+    {
+      "id": "isolation-03",
+      "category": "isolation",
+      "query": "周日复盘",
+      "memories": [
+        {"id": "i3-target", "content": "用户每周日进行学习复盘", "owner": "target"},
+        {"id": "i3-foreign", "content": "用户每周日参加跑团", "owner": "other"}
+      ],
+      "expected_ids": ["i3-target"],
+      "limit": 2
+    }
+  ]
+}

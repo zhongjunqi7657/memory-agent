@@ -61,6 +61,7 @@ class MemoryStatus(str, enum.Enum):
     ACTIVE = "active"
     SUPERSEDED = "superseded"
     DELETED = "deleted"
+    REJECTED = "rejected"
 
 
 class MemorySensitivity(str, enum.Enum):

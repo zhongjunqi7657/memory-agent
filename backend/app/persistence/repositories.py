@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.retrieval import ScoredMemory, rank_memories
@@ -53,11 +53,38 @@ class ConversationRepository:
             )
         )
 
-    async def create_conversation(self, user_id: UUID) -> Conversation:
-        conversation = Conversation(user_id=user_id)
+    async def list_conversations(
+        self, user_id: UUID, *, limit: int = 50
+    ) -> list[Conversation]:
+        result = await self.session.scalars(
+            select(Conversation)
+            .where(
+                Conversation.user_id == user_id,
+                Conversation.is_archived.is_(False),
+            )
+            .order_by(Conversation.updated_at.desc())
+            .limit(limit)
+        )
+        return list(result.all())
+
+    async def create_conversation(
+        self, user_id: UUID, *, title: str | None = None
+    ) -> Conversation:
+        conversation = Conversation(user_id=user_id, title=title)
         self.session.add(conversation)
         await self.session.flush()
         return conversation
+
+    async def list_messages(
+        self, conversation_id: UUID, *, limit: int = 200
+    ) -> list[Message]:
+        result = await self.session.scalars(
+            select(Message)
+            .where(Message.conversation_id == conversation_id)
+            .order_by(Message.sequence.desc())
+            .limit(limit)
+        )
+        return list(reversed(result.all()))
 
     async def list_recent_messages(
         self, conversation_id: UUID, limit: int
@@ -95,6 +122,11 @@ class ConversationRepository:
             is_redacted=is_redacted,
         )
         self.session.add(message)
+        await self.session.execute(
+            update(Conversation)
+            .where(Conversation.id == conversation_id)
+            .values(updated_at=func.now())
+        )
         await self.session.flush()
         return message
 

@@ -1,0 +1,186 @@
+{
+  "dataset_version": "2026-09-03-v1",
+  "model": "qwen-plus",
+  "generated_at": "2026-09-03T03:37:23.936969+00:00",
+  "predictions": {
+    "extract-fact-01": {
+      "memories": [
+        {
+          "content": "用户计划在两个月内完成长期记忆 Agent 项目。",
+          "kind": "semantic",
+          "confidence": 0.95,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 3670.12,
+      "input_tokens": 124,
+      "output_tokens": 89
+    },
+    "extract-fact-02": {
+      "memories": [
+        {
+          "content": "喜欢先理解原理，再动手写代码",
+          "kind": "semantic",
+          "confidence": 1.0,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 2762.04,
+      "input_tokens": 122,
+      "output_tokens": 80
+    },
+    "extract-fact-03": {
+      "memories": [
+        {
+          "content": "林舟",
+          "kind": "semantic",
+          "confidence": 1.0,
+          "sensitivity": "normal",
+          "explicit": true
+        },
+        {
+          "content": "前端开发者",
+          "kind": "semantic",
+          "confidence": 1.0,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 3809.94,
+      "input_tokens": 122,
+      "output_tokens": 122
+    },
+    "extract-fact-04": {
+      "memories": [
+        {
+          "content": "昨天第一次独立完成 PostgreSQL 数据迁移",
+          "kind": "episodic",
+          "confidence": 1.0,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 2773.36,
+      "input_tokens": 121,
+      "output_tokens": 80
+    },
+    "extract-fact-05": {
+      "memories": [
+        {
+          "content": "长期目标是成为能够独立负责 Agent 系统的后端工程师",
+          "kind": "semantic",
+          "confidence": 1.0,
+          "sensitivity": "sensitive",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 2961.85,
+      "input_tokens": 129,
+      "output_tokens": 91
+    },
+    "extract-fact-06": {
+      "memories": [
+        {
+          "content": "每周日晚上复盘本周学习进度",
+          "kind": "semantic",
+          "confidence": 1.0,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 2985.98,
+      "input_tokens": 123,
+      "output_tokens": 83
+    },
+    "extract-irrelevant-01": {
+      "memories": [],
+      "latency_ms": 1263.5,
+      "input_tokens": 116,
+      "output_tokens": 8
+    },
+    "extract-irrelevant-02": {
+      "memories": [],
+      "latency_ms": 1375.28,
+      "input_tokens": 120,
+      "output_tokens": 8
+    },
+    "extract-irrelevant-03": {
+      "memories": [
+        {
+          "content": "午饭吃了面",
+          "kind": "episodic",
+          "confidence": 0.9,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 2844.35,
+      "input_tokens": 120,
+      "output_tokens": 80
+    },
+    "extract-inference-01": {
+      "memories": [
+        {
+          "content": "用户认为自己可能更适合晨间学习，因为最近总在早上提问。",
+          "kind": "semantic",
+          "confidence": 0.9,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 3007.6,
+      "input_tokens": 127,
+      "output_tokens": 90
+    },
+    "extract-inference-02": {
+      "memories": [
+        {
+          "content": "用户认为自己可能不擅长算法，依据是一道题未解出",
+          "kind": "semantic",
+          "confidence": 0.7,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 3336.31,
+      "input_tokens": 125,
+      "output_tokens": 92
+    },
+    "extract-sensitive-01": {
+      "memories": [
+        {
+          "content": "健康状况需要定期复查",
+          "kind": "semantic",
+          "confidence": 0.9,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 2707.53,
+      "input_tokens": 120,
+      "output_tokens": 74
+    },
+    "extract-sensitive-02": {
+      "memories": [],
+      "latency_ms": 1196.08,
+      "input_tokens": 134,
+      "output_tokens": 8
+    },
+    "extract-sensitive-03": {
+      "memories": [
+        {
+          "content": "目前有一笔助学贷款",
+          "kind": "semantic",
+          "confidence": 0.95,
+          "sensitivity": "normal",
+          "explicit": true
+        }
+      ],
+      "latency_ms": 2638.56,
+      "input_tokens": 127,
+      "output_tokens": 72
+    }
+  }
+}

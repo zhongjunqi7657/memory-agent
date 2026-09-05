@@ -3,19 +3,24 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from contextlib import suppress
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.responses import StreamingResponse
 
 from app.agent.service import AgentInputError, AgentService
-from app.persistence.db import get_session
+from app.config.business import get_business_config
+from app.persistence.db import get_session, get_session_factory
+from app.security.auth import require_demo_auth
+from app.security.limits import enforce_chat_limits
 
-router = APIRouter(prefix="/v1", tags=["chat"])
+router = APIRouter(
+    prefix="/v1", tags=["chat"], dependencies=[Depends(require_demo_auth)]
+)
+_running_stream_tasks: set[asyncio.Task[None]] = set()
 
 
 class ChatRequest(BaseModel):
@@ -46,6 +51,9 @@ async def chat(
     request: ChatRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> ChatResponse:
+    enforce_chat_limits(
+        request.user_key, request.content, get_business_config().security
+    )
     try:
         result = await AgentService(session).chat(
             user_key=request.user_key,
@@ -60,8 +68,13 @@ async def chat(
 @router.post("/chat/stream")
 async def chat_stream(
     request: ChatRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session_factory: Annotated[
+        async_sessionmaker[AsyncSession], Depends(get_session_factory)
+    ],
 ) -> StreamingResponse:
+    enforce_chat_limits(
+        request.user_key, request.content, get_business_config().security
+    )
     async def event_generator() -> AsyncIterator[str]:
         queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
 
@@ -70,37 +83,35 @@ async def chat_stream(
 
         async def run_agent() -> None:
             try:
-                await AgentService(session).chat(
-                    user_key=request.user_key,
-                    content=request.content,
-                    conversation_id=request.conversation_id,
-                    event_sink=publish,
+                async with session_factory() as session:
+                    await AgentService(session).chat(
+                        user_key=request.user_key,
+                        content=request.content,
+                        conversation_id=request.conversation_id,
+                        event_sink=publish,
+                    )
+            except Exception:  # noqa: BLE001 - never expose provider details
+                await queue.put(
+                    {"event_type": "error", "payload": {"message": "请求处理失败"}}
                 )
             finally:
                 await queue.put(None)
 
         task = asyncio.create_task(run_agent())
-        try:
-            while True:
-                try:
-                    event = await asyncio.wait_for(queue.get(), timeout=15)
-                except asyncio.TimeoutError:
-                    yield ": keep-alive\n\n"
-                    continue
-                if event is None:
-                    break
-                yield format_sse(event)
+        _running_stream_tasks.add(task)
+        task.add_done_callback(_running_stream_tasks.discard)
+        # The task is intentionally independent from this response iterator. A
+        # disconnected client can replay its persisted events without a second run.
+        while True:
             try:
-                await task
-            except Exception:  # noqa: BLE001 - return a safe SSE error event
-                yield format_sse(
-                    {"event_type": "error", "payload": {"message": "请求处理失败"}}
-                )
-        finally:
-            if not task.done():
-                task.cancel()
-                with suppress(asyncio.CancelledError):
-                    await task
+                event = await asyncio.wait_for(queue.get(), timeout=15)
+            except asyncio.TimeoutError:
+                yield ": keep-alive\n\n"
+                continue
+            if event is None:
+                break
+            yield format_sse(event)
+        await task
 
     return StreamingResponse(
         event_generator(),

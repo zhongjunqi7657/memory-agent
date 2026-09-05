@@ -1,0 +1,88 @@
+{
+  "dataset_version": "2026-09-03-v1",
+  "sample_count": 36,
+  "extraction": {
+    "case_accuracy": 0.8571,
+    "precision": 0.8333,
+    "recall": 0.9091,
+    "f1": 0.8696,
+    "average_latency_ms": 2666.61,
+    "input_tokens": 1730,
+    "output_tokens": 977
+  },
+  "retrieval": {
+    "precision": 0.9167,
+    "recall": 0.8462,
+    "conflict_interception_rate": 0.8,
+    "deletion_residual_rate": 0.0,
+    "cross_user_leak_rate": 0.0
+  },
+  "known_failure_count": 5,
+  "known_failures": [
+    {
+      "case_id": "extract-fact-05",
+      "category": "fact",
+      "expected": [
+        {
+          "keywords": [
+            "Agent",
+            "后端工程师"
+          ],
+          "kind": "semantic",
+          "decision": "active"
+        }
+      ],
+      "actual": [
+        {
+          "content": "长期目标是成为能够独立负责 Agent 系统的后端工程师",
+          "kind": "semantic",
+          "confidence": 1.0,
+          "sensitivity": "sensitive",
+          "explicit": true,
+          "decision": "pending"
+        }
+      ]
+    },
+    {
+      "case_id": "extract-irrelevant-03",
+      "category": "irrelevant",
+      "expected": [],
+      "actual": [
+        {
+          "content": "午饭吃了面",
+          "kind": "episodic",
+          "confidence": 0.9,
+          "sensitivity": "normal",
+          "explicit": true,
+          "decision": "active"
+        }
+      ]
+    },
+    {
+      "case_id": "recall-06",
+      "category": "recall",
+      "expected": [
+        "r6-target"
+      ],
+      "actual": [
+        "r6-noise"
+      ]
+    },
+    {
+      "case_id": "recall-09",
+      "category": "recall",
+      "expected": [
+        "r9-target"
+      ],
+      "actual": []
+    },
+    {
+      "case_id": "conflict-03",
+      "category": "conflict",
+      "expected": [
+        "c3-old"
+      ],
+      "actual": []
+    }
+  ]
+}

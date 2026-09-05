@@ -28,7 +28,7 @@ from app.agent.service import AgentService
 from app.config.settings import Settings
 from app.jobs import worker
 from app.main import app
-from app.persistence.db import get_session
+from app.persistence.db import get_session, get_session_factory
 from app.persistence.models import (
     ExtractionJob,
     ExtractionJobStatus,
@@ -208,6 +208,7 @@ async def test_sse_chat_recalls_memory_across_conversations(
         return model
 
     app.dependency_overrides[get_session] = override_session
+    app.dependency_overrides[get_session_factory] = lambda: postgres_factory
     monkeypatch.setattr(chat_api, "AgentService", create_agent)
     monkeypatch.setattr(agent_service, "create_chat_model", create_model)
     try:

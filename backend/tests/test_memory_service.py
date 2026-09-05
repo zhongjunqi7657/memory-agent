@@ -3,7 +3,8 @@ from uuid import uuid4
 import pytest
 
 from app.memory.service import MemoryService
-from app.persistence.models import MemoryStatus
+from app.persistence.models import Memory, MemoryStatus
+from app.persistence.repositories import MemoryRepository
 
 
 class FakeSession:
@@ -50,3 +51,20 @@ async def test_explicit_secret_is_not_persisted():
 
     assert memory is None
     assert session.added == []
+
+
+@pytest.mark.asyncio
+async def test_pending_memory_can_be_rejected_without_becoming_retrievable():
+    session = FakeSession()
+    memory = Memory(
+        user_id=uuid4(),
+        content="用户可能偏好晨间学习",
+        status=MemoryStatus.PENDING,
+        kind="semantic",
+        sensitivity="normal",
+        confidence=0.9,
+    )
+
+    await MemoryRepository(session).set_status(memory, MemoryStatus.REJECTED)
+
+    assert memory.status is MemoryStatus.REJECTED

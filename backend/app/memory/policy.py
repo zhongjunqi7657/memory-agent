@@ -38,10 +38,11 @@ class MemoryAssessment:
 
 _SENSITIVE_PATTERNS = (
     re.compile(r"(?:病史|诊断|抑郁|焦虑症|服药|手术|体检结果|健康状况)"),
-    re.compile(r"(?:收入|工资|负债|欠款|存款|资产|贷款金额)"),
+    re.compile(r"(?:收入|工资|负债|欠款|存款|资产|助学贷款|贷款(?:金额|余额|记录)?)"),
     re.compile(r"(?:家庭住址|详细地址|门牌号|住在.+(?:路|街|小区|栋|室))"),
     re.compile(r"(?:政治立场|宗教信仰|性取向|性生活)"),
 )
+_INFERENCE_PATTERN = re.compile(r"(?:可能|也许|大概|似乎|或许|推测|猜测)")
 
 
 def detect_sensitivity(content: str) -> MemorySensitivity:
@@ -77,6 +78,7 @@ def assess_candidate(
         candidate.sensitivity is MemorySensitivity.SENSITIVE
         or detected_sensitivity is MemorySensitivity.SENSITIVE
         or not candidate.explicit
+        or _INFERENCE_PATTERN.search(candidate.content)
         or candidate.confidence < business.active_confidence_threshold
     ):
         reason = "敏感信息或模型推断，等待用户在记忆面板确认"
