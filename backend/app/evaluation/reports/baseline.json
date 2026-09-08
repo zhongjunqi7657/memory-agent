@@ -15,7 +15,8 @@
     "recall": 0.8462,
     "conflict_interception_rate": 0.8,
     "deletion_residual_rate": 0.0,
-    "cross_user_leak_rate": 0.0
+    "cross_user_leak_rate": 0.0,
+    "embedding_fallback_ratio": 0.8636
   },
   "known_failure_count": 5,
   "known_failures": [

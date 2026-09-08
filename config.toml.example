@@ -9,8 +9,13 @@ embedding_dimensions = 1024
 auto_retrieve_limit = 5
 tool_retrieve_limit = 10
 max_injected_tokens = 1200
-vector_weight = 0.7
-keyword_weight = 0.3
+vector_weight = 0.55
+keyword_weight = 0.20
+recency_weight = 0.10
+importance_weight = 0.10
+type_weight = 0.05
+recency_half_life_days = 30
+min_relevance_score = 0.08
 max_retries = 3
 active_confidence_threshold = 0.85
 pending_confidence_threshold = 0.5
@@ -18,6 +23,10 @@ pending_confidence_threshold = 0.5
 [agent]
 recent_turns = 8
 max_tool_rounds = 4
+context_token_budget = 6000
+summary_trigger_tokens = 4800
+summary_refresh_messages = 6
+summary_max_chars = 1200
 
 [security]
 max_input_chars = 4000

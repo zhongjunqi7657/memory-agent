@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from enum import Enum
+from uuid import UUID
 
 from app.config.business import MemoryConfig, get_business_config
 from app.persistence.models import MemoryKind, MemorySensitivity
@@ -25,6 +26,8 @@ class MemoryCandidate:
     sensitivity: MemorySensitivity = MemorySensitivity.NORMAL
     explicit: bool = True
     canonical_key: str | None = None
+    importance: float = 0.5
+    contradicts_memory_ids: tuple[UUID, ...] = ()
 
 
 @dataclass(frozen=True)

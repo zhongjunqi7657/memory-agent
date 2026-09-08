@@ -24,6 +24,7 @@ def test_baseline_report_is_reproducible_without_model_api() -> None:
     assert report == expected_report
     assert report["retrieval"]["deletion_residual_rate"] == 0
     assert report["retrieval"]["cross_user_leak_rate"] == 0
+    assert 0 <= report["retrieval"]["embedding_fallback_ratio"] <= 1
 
 
 def test_prediction_snapshot_does_not_persist_fixture_secret() -> None:

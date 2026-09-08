@@ -136,10 +136,12 @@ def evaluate_retrieval(
     deleted_relevant = 0
     isolation_leaks = 0
     isolation_results = 0
+    embedding_fallback_cases = 0
     failures: list[dict[str, object]] = []
     now = datetime.now(timezone.utc)
 
     for case in dataset.retrieval_cases:
+        embedding_fallback_cases += int(case.query_embedding is None)
         eligible = [
             item
             for item in case.memories
@@ -200,6 +202,9 @@ def evaluate_retrieval(
                 deleted_retrieved, deleted_relevant
             ),
             "cross_user_leak_rate": _round_ratio(isolation_leaks, isolation_results),
+            "embedding_fallback_ratio": _round_ratio(
+                embedding_fallback_cases, len(dataset.retrieval_cases)
+            ),
         },
         failures,
     )

@@ -4,15 +4,17 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from sqlalchemy import and_, case, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.config.business import get_business_config
 from app.memory.extractor import MemoryExtractor
+from app.models.qwen import create_embedding_model
 from app.persistence.db import SessionFactory
-from app.persistence.models import ExtractionJob, ExtractionJobStatus
+from app.persistence.models import ExtractionJob, ExtractionJobStatus, Memory
+from app.persistence.repositories import ConversationRepository
 
 JOB_LEASE_SECONDS = 300
 
@@ -87,9 +89,56 @@ async def process_one() -> bool:
         if job is None:
             return False
         try:
-            await MemoryExtractor(session).extract_and_store(
-                user_id=job.user_id, message=job.message
-            )
+            if job.payload.get("job_type") == "embedding_backfill":
+                memory_id = UUID(str(job.payload["memory_id"]))
+                memory = await session.get(Memory, memory_id)
+                if memory and memory.embedding is None:
+                    business = get_business_config()
+                    embedding = await create_embedding_model(
+                        config=business
+                    ).aembed_query(memory.content)
+                    if len(embedding) != business.models.embedding_dimensions:
+                        raise ValueError("Embedding 维度与配置不一致")
+                    memory.embedding = embedding
+                    metadata = dict(memory.metadata_)
+                    metadata["embedding_status"] = "ready"
+                    memory.metadata_ = metadata
+            else:
+                memories = await MemoryExtractor(session).extract_and_store(
+                    user_id=job.user_id, message=job.message
+                )
+                repository = ConversationRepository(session)
+                for memory in memories:
+                    if memory.metadata_.get("embedding_status") == "pending":
+                        await repository.queue_embedding_job(
+                            memory=memory,
+                            message_id=job.message_id,
+                            conversation_id=job.conversation_id,
+                            run_id=job.payload.get("run_id"),
+                        )
+                run_id = job.payload.get("run_id")
+                if run_id:
+                    parsed_run_id = UUID(str(run_id))
+                    await repository.add_run_event(
+                        parsed_run_id,
+                        sequence=await repository.next_run_event_sequence(
+                            parsed_run_id
+                        ),
+                        event_type="memory.extraction_completed",
+                        payload={
+                            "changes": [
+                                {
+                                    "id": str(memory.id),
+                                    "content": memory.content,
+                                    "status": memory.status.value,
+                                    "conflicts_with": memory.metadata_.get(
+                                        "conflicts_with", []
+                                    ),
+                                }
+                                for memory in memories
+                            ]
+                        },
+                    )
             job.status = ExtractionJobStatus.COMPLETED
             job.finished_at = datetime.now(timezone.utc)
             job.locked_at = None

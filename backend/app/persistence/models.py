@@ -98,6 +98,9 @@ class Conversation(TimestampMixin, Base):
     )
     title: Mapped[str | None] = mapped_column(String(200))
     summary: Mapped[str | None] = mapped_column(Text)
+    summary_through_sequence: Mapped[int] = mapped_column(
+        Integer, default=0, nullable=False
+    )
     is_archived: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
 
     user: Mapped[User] = relationship(back_populates="conversations")
@@ -226,8 +229,17 @@ class Memory(TimestampMixin, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     canonical_key: Mapped[str | None] = mapped_column(String(200))
     confidence: Mapped[Decimal] = mapped_column(Numeric(4, 3), nullable=False)
+    importance: Mapped[Decimal] = mapped_column(
+        Numeric(4, 3), default=Decimal("0.500"), nullable=False
+    )
     source_message_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("messages.id", ondelete="SET NULL")
+    )
+    source_message_ids: Mapped[list[str]] = mapped_column(
+        JSON_TYPE, default=list, nullable=False
+    )
+    conversation_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("conversations.id", ondelete="SET NULL")
     )
     superseded_by_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("memories.id", ondelete="SET NULL")
@@ -242,6 +254,9 @@ class Memory(TimestampMixin, Base):
     user: Mapped[User] = relationship(back_populates="memories")
     source_message: Mapped[Message | None] = relationship(
         foreign_keys=[source_message_id]
+    )
+    conversation: Mapped[Conversation | None] = relationship(
+        foreign_keys=[conversation_id]
     )
     superseded_by: Mapped[Memory | None] = relationship(
         remote_side=[id], foreign_keys=[superseded_by_id]

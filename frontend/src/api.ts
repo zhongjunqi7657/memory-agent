@@ -8,9 +8,42 @@ export interface Memory {
   sensitivity: "normal" | "sensitive" | "secret";
   content: string;
   confidence: number;
+  importance: number;
   canonical_key: string | null;
   metadata: Record<string, unknown>;
   source_message_id: string | null;
+  source_message_ids: string[];
+  conversation_id: string | null;
+}
+
+export interface TimelineItem {
+  id: string;
+  content: string;
+  kind: MemoryKind;
+  status: MemoryStatus;
+  importance: number;
+  conversation_id: string | null;
+  valid_from: string | null;
+  created_at: string;
+}
+
+export interface PublicConfig {
+  environment: string;
+  provider_configured: boolean;
+  models: {
+    chat: string;
+    embedding: string;
+    embedding_dimensions: number;
+  };
+  memory: {
+    auto_retrieve_limit: number;
+    weights: Record<string, number>;
+  };
+  agent: {
+    context_token_budget: number;
+    max_tool_rounds: number;
+  };
+  checkpoint: { ready: boolean; error: string | null };
 }
 
 export interface ConversationSummary {
@@ -209,14 +242,49 @@ export async function fetchMemories(): Promise<Memory[]> {
   return parseResponse<Memory[]>(response);
 }
 
-export async function updateMemory(id: string, status: "active" | "rejected" | "deleted") {
+export type MemoryUpdate = {
+  status?: "active" | "pending" | "rejected" | "deleted";
+  content?: string;
+  importance?: number;
+};
+
+export async function updateMemory(id: string, update: MemoryUpdate) {
   const response = await requestWithDemoAuth(
     `${apiBase}/v1/memories/${encodeURIComponent(id)}?user_key=${userKey}`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status }),
+      body: JSON.stringify(update),
     },
   );
   return parseResponse<Memory>(response);
+}
+
+export async function undoMemory(id: string) {
+  const response = await requestWithDemoAuth(
+    `${apiBase}/v1/memories/${encodeURIComponent(id)}/undo?user_key=${userKey}`,
+    { method: "POST" },
+  );
+  return parseResponse<Memory>(response);
+}
+
+export async function fetchTimeline(): Promise<TimelineItem[]> {
+  const response = await requestWithDemoAuth(
+    `${apiBase}/v1/timeline?user_key=${userKey}&limit=100`,
+  );
+  return parseResponse<TimelineItem[]>(response);
+}
+
+export async function generateReview(periodDays: number) {
+  const response = await requestWithDemoAuth(`${apiBase}/v1/reviews`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ user_key: userKey, period_days: periodDays }),
+  });
+  return parseResponse<{ period_days: number; content: string }>(response);
+}
+
+export async function fetchPublicConfig(): Promise<PublicConfig> {
+  const response = await requestWithDemoAuth(`${apiBase}/config`);
+  return parseResponse<PublicConfig>(response);
 }

@@ -104,9 +104,20 @@ async def test_migrated_schema_vector_io_and_worker_locking(
                 )
             ).all()
         )
+        memory_columns = set(
+            (
+                await session.scalars(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'public' AND table_name = 'memories'"
+                    )
+                )
+            ).all()
+        )
     assert extension == "vector"
     assert embedding_type == "vector(1024)"
     assert {"available_at", "locked_at", "locked_by", "idempotency_key"} <= job_columns
+    assert {"importance", "source_message_ids", "conversation_id"} <= memory_columns
 
     external_key = f"postgres-integration-{uuid4()}"
     vector = [1.0, *([0.0] * 1023)]
@@ -134,7 +145,10 @@ async def test_migrated_schema_vector_io_and_worker_locking(
                 sensitivity=MemorySensitivity.NORMAL,
                 content="用户喜欢通过实例学习",
                 confidence=Decimal("1.000"),
+                importance=Decimal("0.800"),
                 source_message_id=first_message.id,
+                source_message_ids=[str(first_message.id)],
+                conversation_id=conversation.id,
                 embedding=vector,
             )
             session.add(memory)
@@ -246,6 +260,7 @@ async def test_sse_chat_recalls_memory_across_conversations(
         assert event_types == [
             "run.started",
             "memory.retrieved",
+            "session.loaded",
             "model.completed",
             "memory.extraction_queued",
             "run.completed",
@@ -254,7 +269,7 @@ async def test_sse_chat_recalls_memory_across_conversations(
         assert "用户的学习方式是通过实例学习" in model.prompts[-1]
         assert model_factory_calls == 1
         assert replayed.status_code == 200
-        assert [event["sequence"] for event in replayed.json()] == [2, 3, 4, 5]
+        assert [event["sequence"] for event in replayed.json()] == [2, 3, 4, 5, 6]
     finally:
         app.dependency_overrides.clear()
         async with postgres_factory() as session, session.begin():

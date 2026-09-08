@@ -6,7 +6,18 @@ type RetrievedMemory = {
   content: string;
   kind: string;
   score: number;
+  keyword_score?: number;
+  vector_score?: number;
+  recency_score?: number;
+  importance_score?: number;
+  type_score?: number;
   reason: string;
+};
+
+type MemoryChange = {
+  id: string;
+  content: string;
+  status: string;
 };
 
 const eventLabels: Record<string, string> = {
@@ -14,9 +25,14 @@ const eventLabels: Record<string, string> = {
   "memory.embedding_ready": "语义向量已生成",
   "memory.embedding_fallback": "已降级为关键词召回",
   "memory.retrieved": "长期记忆召回",
+  "session.loaded": "会话上下文已载入",
+  "session.summary_updated": "会话摘要已更新",
+  "tool.started": "工具开始执行",
+  "tool.completed": "工具执行完成",
   "model.completed": "回答已生成",
   "memory.extraction_queued": "记忆提取已入队",
   "memory.command_applied": "记忆指令已处理",
+  "memory.extraction_completed": "记忆提取已完成",
   "run.completed": "运行已完成",
   "run.failed": "运行失败",
 };
@@ -31,6 +47,12 @@ function eventDescription(event: RunEvent) {
   if (event.event_type === "memory.retrieved") {
     return `${String(event.payload.count ?? 0)} 条匹配`;
   }
+  if (event.event_type === "tool.started" || event.event_type === "tool.completed") {
+    return String(event.payload.tool ?? "记忆工具");
+  }
+  if (event.event_type === "session.loaded") {
+    return `${String(event.payload.message_count ?? 0)} 条消息 · 约 ${String(event.payload.estimated_tokens ?? 0)} tokens`;
+  }
   return null;
 }
 
@@ -38,6 +60,10 @@ export function RunDetails({ events }: { events: RunEvent[] }) {
   const retrieval = events.find((event) => event.event_type === "memory.retrieved");
   const memories = Array.isArray(retrieval?.payload.memories)
     ? (retrieval.payload.memories as RetrievedMemory[])
+    : [];
+  const extraction = events.find((event) => event.event_type === "memory.extraction_completed");
+  const changes = Array.isArray(extraction?.payload.changes)
+    ? (extraction.payload.changes as MemoryChange[])
     : [];
 
   return (
@@ -55,10 +81,12 @@ export function RunDetails({ events }: { events: RunEvent[] }) {
               <div className="retrieved-memory" key={memory.id}>
                 <p>{memory.content}</p>
                 <span>{memory.reason} · 相关度 {(memory.score * 100).toFixed(0)}%</span>
+                <span className="score-breakdown">向量 {Math.round((memory.vector_score ?? 0) * 100)} · 关键词 {Math.round((memory.keyword_score ?? 0) * 100)} · 时间 {Math.round((memory.recency_score ?? 0) * 100)} · 重要度 {Math.round((memory.importance_score ?? 0) * 100)} · 类型 {Math.round((memory.type_score ?? 0) * 100)}</span>
               </div>
             ))}
           </section>
         )}
+        {changes.length > 0 && <section className="memory-change-section"><h3>本轮记忆变化</h3>{changes.map((change) => <div key={change.id}><span>{change.status}</span><p>{change.content}</p></div>)}</section>}
         <ol className="event-list">
           {events.map((event, index) => (
             <li key={`${event.sequence ?? index}-${event.event_type}`}>

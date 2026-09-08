@@ -6,10 +6,12 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from uuid import UUID
 
-from langchain_core.messages import AIMessage, HumanMessage
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.agent.graph import build_graph
+from app.agent.checkpoint import get_checkpointer
+from app.agent.context import estimate_tokens, prepare_conversation_context
+from app.agent.graph import build_graph, replace_checkpoint_messages
+from app.agent.tools import create_memory_tools
 from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import Settings, get_settings
 from app.memory.commands import MemoryCommandType, parse_memory_command
@@ -125,7 +127,10 @@ class AgentService:
             )
             if queue_extraction:
                 await repository.queue_extraction_job(
-                    user.id, conversation.id, user_message.id
+                    user.id,
+                    conversation.id,
+                    user_message.id,
+                    payload={"run_id": str(run.id)},
                 )
                 await emit("memory.extraction_queued")
             await repository.finish_run(run, status=RunStatus.COMPLETED)
@@ -177,6 +182,7 @@ class AgentService:
                             user_id=user.id,
                             content=command.target,
                             source_message_id=user_message.id,
+                            conversation_id=conversation.id,
                         )
                         answer = "这条内容没有被写入长期记忆。"
                         if memory and memory.status is MemoryStatus.ACTIVE:
@@ -215,6 +221,7 @@ class AgentService:
                         old_query=command.target,
                         replacement=command.replacement or "",
                         source_message_id=user_message.id,
+                        conversation_id=conversation.id,
                     )
                     answer = "这条更正没有被写入长期记忆。"
                     if new_memory and new_memory.status is MemoryStatus.ACTIVE:
@@ -263,7 +270,24 @@ class AgentService:
             limit=self.business.memory.auto_retrieve_limit,
             vector_weight=self.business.memory.vector_weight,
             keyword_weight=self.business.memory.keyword_weight,
+            recency_weight=self.business.memory.recency_weight,
+            importance_weight=self.business.memory.importance_weight,
+            type_weight=self.business.memory.type_weight,
+            recency_half_life_days=self.business.memory.recency_half_life_days,
+            min_relevance_score=self.business.memory.min_relevance_score,
         )
+        injected: list = []
+        injected_tokens = 0
+        for item in scored_memories:
+            item_tokens = estimate_tokens(item.memory.content) + 4
+            if injected and (
+                injected_tokens + item_tokens
+                > self.business.memory.max_injected_tokens
+            ):
+                break
+            injected.append(item)
+            injected_tokens += item_tokens
+        scored_memories = injected
         memories = [item.memory for item in scored_memories]
         memory_context = "\n".join(f"- {memory.content}" for memory in memories)
         await emit(
@@ -278,28 +302,70 @@ class AgentService:
                         "score": round(item.score, 4),
                         "keyword_score": round(item.keyword_score, 4),
                         "vector_score": round(item.vector_score, 4),
+                        "recency_score": round(item.recency_score, 4),
+                        "importance_score": round(item.importance_score, 4),
+                        "type_score": round(item.type_score, 4),
                         "reason": item.reason,
                     }
                     for item in scored_memories
                 ],
             },
         )
-        recent_messages = await repository.list_recent_messages(
-            conversation.id, self.business.agent.recent_turns
-        )
-        graph_messages = [
-            HumanMessage(content=message.content)
-            if message.role is MessageRole.USER
-            else AIMessage(content=message.content)
-            for message in recent_messages
-        ]
-
         try:
             chat_model = self.chat_model or create_chat_model(
                 settings=self.settings, config=self.business
             )
-            result = await build_graph(chat_model).ainvoke(
-                {"messages": graph_messages, "memory_context": memory_context}
+            stored_messages = await repository.list_messages(
+                conversation.id, limit=200
+            )
+            context = await prepare_conversation_context(
+                self.session,
+                conversation=conversation,
+                messages=stored_messages,
+                chat_model=chat_model,
+                config=self.business.agent,
+                reserved_tokens=injected_tokens,
+            )
+            await emit(
+                "session.loaded",
+                {
+                    "message_count": len(context.messages),
+                    "estimated_tokens": context.estimated_tokens,
+                    "summary_used": bool(context.summary),
+                },
+            )
+            if context.summarized:
+                await emit("session.summary_updated")
+            tools = create_memory_tools(
+                self.session,
+                user_id=user.id,
+                conversation_id=conversation.id,
+                source_message_id=user_message.id,
+                business=self.business,
+                embedding_model=self.embedding_model,
+                emit=emit,
+            )
+            checkpointer = get_checkpointer()
+            graph_messages = context.messages
+            if checkpointer is not None:
+                graph_messages = replace_checkpoint_messages(graph_messages)
+            result = await build_graph(
+                chat_model,
+                tools=tools,
+                max_tool_rounds=self.business.agent.max_tool_rounds,
+                checkpointer=checkpointer,
+            ).ainvoke(
+                {
+                    "messages": graph_messages,
+                    "current_input": redaction.text,
+                    "conversation_summary": context.summary,
+                    "memory_context": memory_context,
+                    "tool_rounds": 0,
+                },
+                config={
+                    "configurable": {"thread_id": str(conversation.id)},
+                    "recursion_limit": self.business.agent.max_tool_rounds * 2 + 10,
+                },
             )
             answer = str(result["messages"][-1].content)
             await emit("model.completed", {"answer_length": len(answer)})

@@ -24,8 +24,13 @@ class MemoryConfig(BaseModel):
     auto_retrieve_limit: int = Field(default=5, ge=1, le=50)
     tool_retrieve_limit: int = Field(default=10, ge=1, le=100)
     max_injected_tokens: int = Field(default=1200, ge=100)
-    vector_weight: float = Field(default=0.7, ge=0, le=1)
-    keyword_weight: float = Field(default=0.3, ge=0, le=1)
+    vector_weight: float = Field(default=0.55, ge=0, le=1)
+    keyword_weight: float = Field(default=0.20, ge=0, le=1)
+    recency_weight: float = Field(default=0.10, ge=0, le=1)
+    importance_weight: float = Field(default=0.10, ge=0, le=1)
+    type_weight: float = Field(default=0.05, ge=0, le=1)
+    recency_half_life_days: int = Field(default=30, ge=1, le=3650)
+    min_relevance_score: float = Field(default=0.08, ge=0, le=1)
     max_retries: int = Field(default=3, ge=0, le=10)
     active_confidence_threshold: float = Field(default=0.85, ge=0, le=1)
     pending_confidence_threshold: float = Field(default=0.5, ge=0, le=1)
@@ -34,6 +39,10 @@ class MemoryConfig(BaseModel):
 class AgentConfig(BaseModel):
     recent_turns: int = Field(default=8, ge=1, le=50)
     max_tool_rounds: int = Field(default=4, ge=0, le=10)
+    context_token_budget: int = Field(default=6000, ge=500, le=100000)
+    summary_trigger_tokens: int = Field(default=4800, ge=200, le=100000)
+    summary_refresh_messages: int = Field(default=6, ge=1, le=100)
+    summary_max_chars: int = Field(default=1200, ge=100, le=10000)
 
 
 class SecurityConfig(BaseModel):

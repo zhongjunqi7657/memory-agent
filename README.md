@@ -54,7 +54,9 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-首版主链路已完成：数据库模型与迁移、千问适配器、LangGraph 对话闭环、混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。Worker 具备租约、幂等键、失败重试和超时任务重新领取字段。PostgreSQL 16 + pgvector 0.8.6 的迁移、向量读写、Worker 跳锁抢占、SSE 事件重放和跨会话记忆召回已经过真实数据库集成测试；千问 `qwen-plus` 对话、结构化记忆提取及 `text-embedding-v3` 1024 维向量链路已经过真实 API 联调。前端支持持久化会话切换、本轮召回依据与分数展示，以及 SSE 断线后按 `run_id + sequence` 恢复；已启动的 Agent Run 不会随浏览器连接断开而取消或重复创建。
+首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。普通聊天冲突会进入待确认，重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取和 Embedding 补偿任务。
+
+Graph 提供 `search_memory`、`get_user_timeline`、`propose_memory_update` 三个受控工具及循环上限，使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用持久摘要与 Token 预算。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。详细状态图、ER 图和面试说明见 [架构文档](docs/architecture.md)、[演示流程](docs/demo-script.md) 与 [面试问答](docs/interview-guide.md)。
 
 ## 本地运行
 
@@ -65,7 +67,7 @@ docs/                     Architecture and interview notes
 5. 启动 API：`uv run uvicorn app.main:app --reload`。
 6. 单独启动记忆 Worker：`uv run python -m app.jobs.worker`。
 
-另开一个终端启动前端：`cd frontend; npm install; npm run dev`，然后访问 `http://127.0.0.1:5173`。前端会将 `/v1` 请求代理到 FastAPI；也可以通过 `VITE_API_BASE_URL` 指向已部署的 API。
+另开一个终端启动前端：`cd frontend; npm install; npm run dev`，然后访问 `http://127.0.0.1:5173`。前端会将 `/v1`、`/health` 和 `/config` 请求代理到 FastAPI；也可以通过 `VITE_API_BASE_URL` 指向已部署的 API。
 
 也可以用 Compose 一次启动 PostgreSQL、API 和 Worker（需要先复制 `config.toml.example` 为 `config.toml`）：
 
@@ -75,7 +77,7 @@ Copy-Item config.toml.example config.toml
 docker compose up -d --build
 ```
 
-设置 `DEMO_SHARED_PASSWORD` 后，所有 `/v1` 路由要求 HTTP Basic 共享密码；前端首次收到 401 时会在当前浏览器会话中询问密码，不会写入持久化存储。不要把未配置限流和密码的聊天接口直接暴露到公网。`scripts/backup.ps1` 可导出数据库，`scripts/restore.ps1 -InputFile <备份文件> -ConfirmRestore` 会在明确确认后恢复；`scripts/clear-data.ps1 -ConfirmClear` 用于清空演示数据。
+设置 `DEMO_SHARED_PASSWORD` 后，所有 `/v1` 路由要求 HTTP Basic 共享密码；前端首次收到 401 时会在当前浏览器会话中询问密码，不会写入持久化存储。不要把未配置限流和密码的聊天接口直接暴露到公网。`scripts/seed-demo.ps1` 可预置演示流程；`scripts/backup.ps1`、`scripts/restore.ps1` 和 `scripts/clear-data.ps1` 分别负责备份、恢复及清空业务与 Checkpoint 数据。
 
 ### 测试
 
@@ -113,6 +115,8 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
 
 curl "http://127.0.0.1:8000/v1/memories?user_key=demo-user"
 
+curl "http://127.0.0.1:8000/config"
+
 # 显式记忆控制（不会经过普通聊天提取队列）
 curl -X POST http://127.0.0.1:8000/v1/chat \
   -H "Content-Type: application/json" \
@@ -125,8 +129,12 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
 curl -X POST http://127.0.0.1:8000/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"user_key":"demo-user","content":"你记住了我什么？"}'
+
+curl -X POST http://127.0.0.1:8000/v1/reviews \
+  -H "Content-Type: application/json" \
+  -d '{"user_key":"demo-user","period_days":7}'
 ```
 
 聊天请求会先在本机脱敏，再写入消息并排队记忆提取任务；前端通过 `POST /v1/chat/stream` 消费 SSE 运行事件，最终事件携带回答和 `redacted` 元数据，可直接用于折叠提示。记忆候选由 Worker 通过结构化输出提取，普通明确信息自动生效，敏感/推断信息进入 `pending`，秘密直接丢弃。
 
-以“请记住/忘记/把……改成……”开头的显式指令会直接进入记忆治理服务：普通事实立即生效，敏感内容进入待确认，凭据和个人号码在本机脱敏后不写入长期记忆。更正产生新版本时，旧记忆标记为 `superseded`；待确认的新版本不会立即淘汰旧记忆。
+以“请记住/忘记/把……改成……”开头的显式指令会直接进入记忆治理服务：普通事实立即生效，敏感内容进入待确认，凭据和个人号码在本机脱敏后不写入长期记忆。冲突更正先产生 `pending` 新版本；只有用户确认后旧记忆才标记为 `superseded`，撤销会恢复这对版本状态。

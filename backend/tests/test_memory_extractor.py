@@ -18,12 +18,25 @@ class FakeStructuredModel:
         return self.result
 
 
+class RepairingStructuredModel(FakeStructuredModel):
+    def __init__(self, result: ExtractionResult):
+        super().__init__(result)
+        self.calls = 0
+
+    async def ainvoke(self, _messages):
+        self.calls += 1
+        if self.calls == 1:
+            raise ValueError("invalid structured output")
+        return self.result
+
+
 class FakeSession:
-    def __init__(self):
+    def __init__(self, *, scalar_batches=None):
         self.added = []
+        self.scalar_batches = list(scalar_batches or [])
 
     async def scalars(self, _statement):
-        return []
+        return self.scalar_batches.pop(0) if self.scalar_batches else []
 
     async def scalar(self, _statement):
         return None
@@ -75,3 +88,70 @@ async def test_extractor_persists_active_and_pending_candidates_without_embeddin
     ]
     assert all(memory.embedding is None for memory in memories)
     assert len(session.added) == 2
+
+
+@pytest.mark.asyncio
+async def test_extractor_repairs_invalid_structured_output_once():
+    session = FakeSession()
+    model = RepairingStructuredModel(
+        ExtractionResult(
+            memories=[
+                ExtractedMemory(
+                    content="用户正在准备后端面试",
+                    kind=MemoryKind.EPISODIC,
+                    confidence=0.95,
+                )
+            ]
+        )
+    )
+    extractor = MemoryExtractor(session, model=model, embedding_model=None)
+
+    memories = await extractor.extract_and_store(
+        user_id=uuid4(),
+        message=SimpleNamespace(
+            id=uuid4(), conversation_id=uuid4(), content="我正在准备后端面试"
+        ),
+    )
+
+    assert model.calls == 2
+    assert len(memories) == 1
+    assert memories[0].status is MemoryStatus.ACTIVE
+
+
+@pytest.mark.asyncio
+async def test_ordinary_extraction_marks_declared_conflict_pending():
+    user_id = uuid4()
+    previous = SimpleNamespace(
+        id=uuid4(),
+        user_id=user_id,
+        content="用户当前目标是准备考研",
+        canonical_key="current_goal",
+        status=MemoryStatus.ACTIVE,
+        updated_at=None,
+    )
+    session = FakeSession(scalar_batches=[[previous], [previous]])
+    model = FakeStructuredModel(
+        ExtractionResult(
+            memories=[
+                ExtractedMemory(
+                    content="用户当前目标是参加秋招",
+                    kind=MemoryKind.SEMANTIC,
+                    confidence=0.97,
+                    canonical_key="current_goal",
+                    contradicts_memory_ids=[previous.id],
+                )
+            ]
+        )
+    )
+
+    memories = await MemoryExtractor(
+        session, model=model, embedding_model=None
+    ).extract_and_store(
+        user_id=user_id,
+        message=SimpleNamespace(
+            id=uuid4(), conversation_id=uuid4(), content="我现在决定参加秋招"
+        ),
+    )
+
+    assert memories[0].status is MemoryStatus.PENDING
+    assert memories[0].metadata_["conflicts_with"] == [str(previous.id)]

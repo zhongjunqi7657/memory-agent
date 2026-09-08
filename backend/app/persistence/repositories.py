@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from uuid import UUID
 
 from sqlalchemy import func, select, update
@@ -167,6 +168,12 @@ class ConversationRepository:
         await self.session.flush()
         return event
 
+    async def next_run_event_sequence(self, run_id: UUID) -> int:
+        last_sequence = await self.session.scalar(
+            select(func.max(RunEvent.sequence)).where(RunEvent.run_id == run_id)
+        )
+        return (last_sequence or 0) + 1
+
     async def list_run_events(
         self,
         run_id: UUID,
@@ -212,6 +219,52 @@ class ConversationRepository:
             status=ExtractionJobStatus.QUEUED,
             idempotency_key=idempotency_key,
             payload=payload or {},
+        )
+        self.session.add(job)
+        await self.session.flush()
+        return job
+
+    async def queue_embedding_job(
+        self,
+        *,
+        memory: Memory,
+        message_id: UUID,
+        conversation_id: UUID,
+        run_id: str | None = None,
+    ) -> ExtractionJob:
+        content_version = hashlib.sha256(memory.content.encode("utf-8")).hexdigest()[:16]
+        idempotency_key = f"embedding:{memory.id}:{content_version}"
+        existing = await self.session.scalar(
+            select(ExtractionJob).where(
+                ExtractionJob.idempotency_key == idempotency_key
+            )
+        )
+        if existing:
+            if (
+                memory.embedding is None
+                and existing.status
+                in {ExtractionJobStatus.COMPLETED, ExtractionJobStatus.FAILED}
+            ):
+                existing.status = ExtractionJobStatus.QUEUED
+                existing.attempts = 0
+                existing.available_at = func.now()
+                existing.locked_at = None
+                existing.locked_by = None
+                existing.finished_at = None
+                existing.last_error = None
+                await self.session.flush()
+            return existing
+        job = ExtractionJob(
+            user_id=memory.user_id,
+            conversation_id=conversation_id,
+            message_id=message_id,
+            status=ExtractionJobStatus.QUEUED,
+            idempotency_key=idempotency_key,
+            payload={
+                "job_type": "embedding_backfill",
+                "memory_id": str(memory.id),
+                "run_id": run_id,
+            },
         )
         self.session.add(job)
         await self.session.flush()
@@ -263,24 +316,72 @@ class MemoryRepository:
         *,
         query_embedding: list[float] | None = None,
         limit: int,
-        vector_weight: float = 0.7,
-        keyword_weight: float = 0.3,
+        vector_weight: float = 0.55,
+        keyword_weight: float = 0.20,
+        recency_weight: float = 0.10,
+        importance_weight: float = 0.10,
+        type_weight: float = 0.05,
+        recency_half_life_days: int = 30,
+        min_relevance_score: float = 0.08,
     ) -> list[ScoredMemory]:
-        statement = (
-            select(Memory)
-            .where(Memory.user_id == user_id, Memory.status == MemoryStatus.ACTIVE)
-            .order_by(Memory.updated_at.desc())
-            .limit(max(limit * 20, 100))
+        candidate_limit = max(limit * 10, 50)
+        active_filter = (
+            Memory.user_id == user_id,
+            Memory.status == MemoryStatus.ACTIVE,
         )
-        result = await self.session.scalars(statement)
+        recent_statement = (
+            select(Memory)
+            .where(*active_filter)
+            .order_by(Memory.updated_at.desc())
+            .limit(candidate_limit)
+        )
+        recent = list((await self.session.scalars(recent_statement)).all())
+        candidates = {memory.id: memory for memory in recent}
+
+        if query_embedding and self._supports_vector_search():
+            distance = Memory.embedding.cosine_distance(query_embedding)
+            vector_statement = (
+                select(Memory)
+                .where(*active_filter, Memory.embedding.is_not(None))
+                .order_by(distance)
+                .limit(candidate_limit)
+            )
+            vector_candidates = await self.session.scalars(vector_statement)
+            candidates.update(
+                (memory.id, memory) for memory in vector_candidates.all()
+            )
+
         return rank_memories(
-            list(result.all()),
+            list(candidates.values()),
             query,
             query_embedding=query_embedding,
             vector_weight=vector_weight,
             keyword_weight=keyword_weight,
+            recency_weight=recency_weight,
+            importance_weight=importance_weight,
+            type_weight=type_weight,
+            recency_half_life_days=recency_half_life_days,
+            min_relevance_score=min_relevance_score,
             limit=limit,
         )
+
+    async def list_timeline(self, user_id: UUID, *, limit: int = 100) -> list[Memory]:
+        result = await self.session.scalars(
+            select(Memory)
+            .where(
+                Memory.user_id == user_id,
+                Memory.status == MemoryStatus.ACTIVE,
+            )
+            .order_by(Memory.valid_from.desc(), Memory.created_at.desc())
+            .limit(limit)
+        )
+        return list(result.all())
+
+    def _supports_vector_search(self) -> bool:
+        try:
+            return self.session.get_bind().dialect.name == "postgresql"
+        except (AttributeError, RuntimeError):
+            return False
 
     async def soft_delete_matching(
         self, user_id: UUID, query: str, *, limit: int = 10
