@@ -1,4 +1,6 @@
 .venv/
+.idea/
+.runtime/
 __pycache__/
 *.py[cod]
 .pytest_cache/
@@ -14,3 +16,4 @@ frontend/.vite/
 frontend/dist/
 coverage.xml
 .coverage
+docs/*.visual-check.*

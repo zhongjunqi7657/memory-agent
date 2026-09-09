@@ -1,0 +1,51 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "Memory Agent 项目架构",
+    "locale": "zh-CN",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/zhongjunqi7657/memory-agent.git",
+      "revision": "367e7098bca14498fde1a6fa39c0c5a40f438df5"
+    },
+    "viewBox": [1280, 720],
+    "views": [
+      {
+        "id": "chat-path",
+        "label": "同步对话",
+        "focus": ["user", "web", "api", "agent", "qwen", "postgres"],
+        "note": "脱敏请求经 LangGraph 召回长期记忆并流式生成回答。"
+      },
+      {
+        "id": "extraction-path",
+        "label": "异步提取",
+        "focus": ["api", "postgres", "worker", "qwen"],
+        "note": "持久任务由独立 Worker 领取，失败可重试且不阻塞 SSE。"
+      }
+    ]
+  },
+  "components": [
+    {"id": "user", "type": "external", "label": "使用者", "sublabel": "聊天与记忆治理", "pos": [34, 270], "size": [132, 72]},
+    {"id": "web", "type": "frontend", "label": "React 薄客户端", "sublabel": "Vite · TypeScript", "sources": [{"path": "frontend/src/App.tsx"}, {"path": "frontend/src/api.ts"}], "pos": [214, 270], "size": [158, 72]},
+    {"id": "api", "type": "security", "label": "FastAPI 接口层", "sublabel": "鉴权 · 限流 · 脱敏 · SSE", "sources": [{"path": "backend/app/main.py"}, {"path": "backend/app/api/chat.py"}], "pos": [430, 270], "size": [170, 72]},
+    {"id": "agent", "type": "backend", "label": "Agent 运行时", "sublabel": "LangGraph · 记忆召回与治理", "sources": [{"path": "backend/app/agent/service.py"}, {"path": "backend/app/agent/graph.py"}, {"path": "backend/app/memory/service.py"}], "pos": [666, 270], "size": [190, 72]},
+    {"id": "qwen", "type": "cloud", "label": "Qwen API", "sublabel": "Chat · Embedding", "sources": [{"path": "backend/app/models/qwen.py"}], "pos": [1056, 270], "size": [158, 72]},
+    {"id": "postgres", "type": "database", "label": "PostgreSQL + pgvector", "sublabel": "业务表 · 向量 · Checkpoint", "sources": [{"path": "backend/app/persistence/models.py"}, {"path": "backend/app/persistence/repositories.py"}, {"path": "backend/app/agent/checkpoint.py"}], "pos": [430, 490], "size": [190, 72]},
+    {"id": "worker", "type": "backend", "label": "记忆提取 Worker", "sublabel": "租约 · 重试 · 幂等 · 补偿", "sources": [{"path": "backend/app/jobs/worker.py"}, {"path": "backend/app/memory/extractor.py"}], "pos": [766, 490], "size": [190, 72]}
+  ],
+  "connections": [
+    {"id": "user-web", "from": "user", "to": "web", "label": "交互", "variant": "emphasis", "labelDy": -28},
+    {"id": "web-api", "from": "web", "to": "api", "label": "HTTP / SSE", "variant": "emphasis", "labelDy": -28},
+    {"id": "api-agent", "from": "api", "to": "agent", "label": "脱敏请求", "variant": "security", "labelDy": -28},
+    {"id": "agent-qwen", "from": "agent", "to": "qwen", "label": "Chat / 工具调用", "variant": "emphasis", "labelDy": -28},
+    {"id": "api-postgres", "from": "api", "to": "postgres", "label": "消息 / 运行 / 任务", "fromSide": "bottom", "toSide": "top"},
+    {"id": "agent-postgres", "from": "agent", "to": "postgres", "label": "混合召回 / Checkpoint", "fromSide": "bottom", "toSide": "right"},
+    {"id": "postgres-worker", "from": "postgres", "to": "worker", "label": "领取持久任务", "variant": "dashed", "labelDy": -28},
+    {"id": "worker-qwen", "from": "worker", "to": "qwen", "label": "结构化提取 / Embedding", "variant": "dashed", "fromSide": "right", "toSide": "bottom"}
+  ],
+  "cards": [
+    {"dot": "cyan", "title": "核心闭环", "items": ["跨会话交流 → 记忆提取 → 风险治理 → 混合召回 → 个性化回答", "显式命令同步治理；普通聊天在回答后异步提取"]},
+    {"dot": "amber", "title": "关键边界", "items": ["API 与 Worker 分进程，SSE 不等待第二次模型调用", "业务记录与 LangGraph Checkpoint 逻辑隔离、共享数据库部署"]}
+  ]
+}
