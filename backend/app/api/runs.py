@@ -4,9 +4,9 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.schemas import RunEventResponse
 from app.persistence.db import get_session
 from app.persistence.repositories import ConversationRepository
 from app.security.auth import require_demo_auth
@@ -14,13 +14,6 @@ from app.security.auth import require_demo_auth
 router = APIRouter(
     prefix="/v1", tags=["runs"], dependencies=[Depends(require_demo_auth)]
 )
-
-
-class RunEventResponse(BaseModel):
-    run_id: UUID
-    sequence: int
-    event_type: str
-    payload: dict
 
 
 @router.get("/runs/{run_id}/events", response_model=list[RunEventResponse])

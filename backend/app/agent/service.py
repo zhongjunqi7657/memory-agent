@@ -124,6 +124,7 @@ class AgentService:
                 role=MessageRole.ASSISTANT,
                 content=answer,
                 sequence=assistant_sequence,
+                run_id=run.id,
             )
             if queue_extraction:
                 await repository.queue_extraction_job(

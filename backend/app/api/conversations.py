@@ -5,9 +5,10 @@ from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.schemas import RunEventResponse
 from app.persistence.db import get_session
 from app.persistence.models import MessageRole
 from app.persistence.repositories import ConversationRepository
@@ -36,6 +37,8 @@ class MessageResponse(BaseModel):
     sequence: int
     is_redacted: bool
     created_at: datetime
+    run_id: UUID | None = None
+    run_events: list[RunEventResponse] = Field(default_factory=list)
 
 
 @router.get("/conversations", response_model=list[ConversationResponse])
@@ -70,4 +73,19 @@ async def list_conversation_messages(
     if conversation is None:
         raise HTTPException(status_code=404, detail="会话不存在")
     messages = await repository.list_messages(conversation.id, limit=limit)
-    return [MessageResponse.model_validate(item) for item in messages]
+    response = []
+    for message in messages:
+        run = getattr(message, "run", None)
+        item = MessageResponse.model_validate(message)
+        response.append(
+            item.model_copy(
+                update={
+                    "run_id": getattr(message, "run_id", None),
+                    "run_events": [
+                        RunEventResponse.model_validate(event)
+                        for event in (run.events if run else [])
+                    ],
+                }
+            )
+        )
+    return response

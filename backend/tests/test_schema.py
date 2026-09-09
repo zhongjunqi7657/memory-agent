@@ -20,8 +20,13 @@ def test_initial_schema_contract() -> None:
     assert "ix_memories_embedding_hnsw" in {index.name for index in memories.indexes}
 
     messages = Base.metadata.tables["messages"]
+    assert messages.c.run_id.nullable is True
     assert any(
         constraint.name == "uq_messages_conversation_sequence"
+        for constraint in messages.constraints
+    )
+    assert any(
+        constraint.name == "uq_messages_run_id"
         for constraint in messages.constraints
     )
 

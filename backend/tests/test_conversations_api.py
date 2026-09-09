@@ -13,6 +13,8 @@ from app.persistence.models import MessageRole
 USER_ID = UUID("00000000-0000-0000-0000-000000000001")
 CONVERSATION_ID = UUID("00000000-0000-0000-0000-000000000002")
 MESSAGE_ID = UUID("00000000-0000-0000-0000-000000000003")
+ASSISTANT_MESSAGE_ID = UUID("00000000-0000-0000-0000-000000000004")
+RUN_ID = UUID("00000000-0000-0000-0000-000000000005")
 NOW = datetime(2026, 9, 3, tzinfo=timezone.utc)
 
 
@@ -51,7 +53,34 @@ class StubConversationRepository:
                 sequence=1,
                 is_redacted=False,
                 created_at=NOW,
-            )
+                run_id=None,
+                run=None,
+            ),
+            SimpleNamespace(
+                id=ASSISTANT_MESSAGE_ID,
+                role=MessageRole.ASSISTANT,
+                content="可以从一个小图开始。",
+                sequence=2,
+                is_redacted=False,
+                created_at=NOW,
+                run_id=RUN_ID,
+                run=SimpleNamespace(
+                    events=[
+                        SimpleNamespace(
+                            run_id=RUN_ID,
+                            sequence=1,
+                            event_type="run.started",
+                            payload={},
+                        ),
+                        SimpleNamespace(
+                            run_id=RUN_ID,
+                            sequence=7,
+                            event_type="memory.extraction_completed",
+                            payload={"changes": []},
+                        ),
+                    ]
+                ),
+            ),
         ]
 
 
@@ -77,4 +106,9 @@ def test_conversation_history_is_user_scoped(monkeypatch) -> None:
     assert conversations.json()[0]["title"] == "学习 LangGraph"
     assert messages.status_code == 200
     assert messages.json()[0]["content"] == "我正在学习 LangGraph"
+    assert messages.json()[1]["run_id"] == str(RUN_ID)
+    assert [event["sequence"] for event in messages.json()[1]["run_events"]] == [
+        1,
+        7,
+    ]
     assert missing.status_code == 404

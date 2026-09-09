@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import (
 import app.api.chat as chat_api
 from app.agent import service as agent_service
 from app.agent.service import AgentService
+from app.config.business import get_business_config
 from app.config.settings import Settings
 from app.jobs import worker
 from app.main import app
@@ -114,10 +115,21 @@ async def test_migrated_schema_vector_io_and_worker_locking(
                 )
             ).all()
         )
+        message_columns = set(
+            (
+                await session.scalars(
+                    text(
+                        "SELECT column_name FROM information_schema.columns "
+                        "WHERE table_schema = 'public' AND table_name = 'messages'"
+                    )
+                )
+            ).all()
+        )
     assert extension == "vector"
     assert embedding_type == "vector(1024)"
     assert {"available_at", "locked_at", "locked_by", "idempotency_key"} <= job_columns
     assert {"importance", "source_message_ids", "conversation_id"} <= memory_columns
+    assert "run_id" in message_columns
 
     external_key = f"postgres-integration-{uuid4()}"
     vector = [1.0, *([0.0] * 1023)]
@@ -221,6 +233,20 @@ async def test_sse_chat_recalls_memory_across_conversations(
         model_factory_calls += 1
         return model
 
+    class EmptyMemoryExtractor:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def extract_and_store(self, **_kwargs):
+            return []
+
+    class FailingMemoryExtractor:
+        def __init__(self, _session) -> None:
+            pass
+
+        async def extract_and_store(self, **_kwargs):
+            raise RuntimeError("provider api_key=sk-example-value-123456")
+
     app.dependency_overrides[get_session] = override_session
     app.dependency_overrides[get_session_factory] = lambda: postgres_factory
     monkeypatch.setattr(chat_api, "AgentService", create_agent)
@@ -250,9 +276,54 @@ async def test_sse_chat_recalls_memory_across_conversations(
             completed = next(
                 event for event in events if event["event_type"] == "run.completed"
             )
+            monkeypatch.setattr(worker, "SessionFactory", postgres_factory)
+            monkeypatch.setattr(worker, "MemoryExtractor", EmptyMemoryExtractor)
+            assert await worker.process_one() is True
             replayed = await client.get(
                 f"/v1/runs/{completed['run_id']}/events",
                 params={"user_key": external_key, "after_sequence": 1},
+            )
+            restored = await client.get(
+                f"/v1/conversations/{completed['payload']['conversation_id']}/messages",
+                params={"user_key": external_key},
+            )
+            isolated = await client.get(
+                f"/v1/runs/{completed['run_id']}/events",
+                params={"user_key": "another-user"},
+            )
+
+            failed = await client.post(
+                "/v1/chat/stream",
+                json={
+                    "user_key": external_key,
+                    "conversation_id": completed["payload"]["conversation_id"],
+                    "content": "今天继续学习",
+                },
+            )
+            failed_events = [
+                json.loads(line.removeprefix("data: "))
+                for line in failed.text.splitlines()
+                if line.startswith("data: ")
+            ]
+            failed_run = next(
+                event
+                for event in failed_events
+                if event["event_type"] == "run.completed"
+            )
+            async with postgres_factory() as session, session.begin():
+                failed_job = await session.scalar(
+                    select(ExtractionJob).where(
+                        ExtractionJob.payload["run_id"].astext
+                        == failed_run["run_id"]
+                    )
+                )
+                assert failed_job is not None
+                failed_job.attempts = get_business_config().memory.max_retries - 1
+            monkeypatch.setattr(worker, "MemoryExtractor", FailingMemoryExtractor)
+            assert await worker.process_one() is True
+            failed_replay = await client.get(
+                f"/v1/runs/{failed_run['run_id']}/events",
+                params={"user_key": external_key},
             )
 
         assert saved.status_code == 200
@@ -267,9 +338,33 @@ async def test_sse_chat_recalls_memory_across_conversations(
         ]
         assert completed["payload"]["memory_count"] == 1
         assert "用户的学习方式是通过实例学习" in model.prompts[-1]
-        assert model_factory_calls == 1
+        assert model_factory_calls == 2
         assert replayed.status_code == 200
-        assert [event["sequence"] for event in replayed.json()] == [2, 3, 4, 5, 6]
+        assert [event["sequence"] for event in replayed.json()] == [2, 3, 4, 5, 6, 7]
+        assert replayed.json()[-1] == {
+            "run_id": completed["run_id"],
+            "sequence": 7,
+            "event_type": "memory.extraction_completed",
+            "payload": {"changes": []},
+        }
+        assert restored.status_code == 200
+        restored_assistant = [
+            message for message in restored.json() if message["role"] == "assistant"
+        ][-1]
+        assert restored_assistant["run_id"] == completed["run_id"]
+        assert restored_assistant["run_events"][-1]["event_type"] == (
+            "memory.extraction_completed"
+        )
+        assert isolated.status_code == 200
+        assert isolated.json() == []
+        assert failed.status_code == 200
+        assert failed_replay.status_code == 200
+        terminal_failure = failed_replay.json()[-1]
+        assert terminal_failure["event_type"] == "memory.extraction_failed"
+        assert terminal_failure["payload"] == {
+            "message": "记忆提取失败，请稍后重试",
+            "attempts": get_business_config().memory.max_retries,
+        }
     finally:
         app.dependency_overrides.clear()
         async with postgres_factory() as session, session.begin():

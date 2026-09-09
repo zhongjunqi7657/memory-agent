@@ -18,6 +18,15 @@ type MemoryChange = {
   id: string;
   content: string;
   status: string;
+  action: "created" | "pending" | "conflict_pending" | "evidence_merged";
+  conflicts_with?: string[];
+};
+
+const memoryChangeLabels: Record<MemoryChange["action"], string> = {
+  created: "已新增",
+  pending: "待确认",
+  conflict_pending: "冲突待确认",
+  evidence_merged: "已合并证据",
 };
 
 const eventLabels: Record<string, string> = {
@@ -33,6 +42,7 @@ const eventLabels: Record<string, string> = {
   "memory.extraction_queued": "记忆提取已入队",
   "memory.command_applied": "记忆指令已处理",
   "memory.extraction_completed": "记忆提取已完成",
+  "memory.extraction_failed": "记忆提取失败",
   "run.completed": "运行已完成",
   "run.failed": "运行失败",
 };
@@ -52,6 +62,13 @@ function eventDescription(event: RunEvent) {
   }
   if (event.event_type === "session.loaded") {
     return `${String(event.payload.message_count ?? 0)} 条消息 · 约 ${String(event.payload.estimated_tokens ?? 0)} tokens`;
+  }
+  if (event.event_type === "memory.extraction_completed") {
+    const changes = Array.isArray(event.payload.changes) ? event.payload.changes.length : 0;
+    return changes > 0 ? `${changes} 项记忆变化` : "未发现需要保存的记忆";
+  }
+  if (event.event_type === "memory.extraction_failed") {
+    return `${String(event.payload.message ?? "记忆提取失败")} · 已尝试 ${String(event.payload.attempts ?? 0)} 次`;
   }
   return null;
 }
@@ -86,7 +103,7 @@ export function RunDetails({ events }: { events: RunEvent[] }) {
             ))}
           </section>
         )}
-        {changes.length > 0 && <section className="memory-change-section"><h3>本轮记忆变化</h3>{changes.map((change) => <div key={change.id}><span>{change.status}</span><p>{change.content}</p></div>)}</section>}
+        {changes.length > 0 && <section className="memory-change-section"><h3>本轮记忆变化</h3>{changes.map((change) => <div key={change.id}><span>{memoryChangeLabels[change.action] ?? change.status}</span><p>{change.content}</p></div>)}</section>}
         <ol className="event-list">
           {events.map((event, index) => (
             <li key={`${event.sequence ?? index}-${event.event_type}`}>

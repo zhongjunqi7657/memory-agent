@@ -60,6 +60,8 @@ export interface StoredMessage {
   sequence: number;
   is_redacted: boolean;
   created_at: string;
+  run_id: string | null;
+  run_events: RunEvent[];
 }
 
 export interface ChatResponse {
@@ -140,7 +142,11 @@ function completedResponse(event: RunEvent): ChatResponse | null {
     : null;
 }
 
-async function fetchRunEvents(runId: string, afterSequence: number): Promise<RunEvent[]> {
+export async function fetchRunEvents(
+  runId: string,
+  afterSequence: number,
+  signal?: AbortSignal,
+): Promise<RunEvent[]> {
   const params = new URLSearchParams({
     user_key: userKey,
     after_sequence: String(afterSequence),
@@ -148,6 +154,7 @@ async function fetchRunEvents(runId: string, afterSequence: number): Promise<Run
   });
   const response = await requestWithDemoAuth(
     `${apiBase}/v1/runs/${encodeURIComponent(runId)}/events?${params}`,
+    { signal },
   );
   return parseResponse<RunEvent[]>(response);
 }
@@ -156,11 +163,12 @@ async function recoverRun(
   runId: string,
   afterSequence: number,
   onEvent?: (event: RunEvent) => void,
+  signal?: AbortSignal,
 ): Promise<ChatResponse> {
   const deadline = Date.now() + replayTimeoutMs;
   let sequence = afterSequence;
   while (Date.now() < deadline) {
-    const events = await fetchRunEvents(runId, sequence);
+    const events = await fetchRunEvents(runId, sequence, signal);
     for (const event of events) {
       sequence = Math.max(sequence, event.sequence ?? sequence);
       onEvent?.(event);
@@ -170,7 +178,17 @@ async function recoverRun(
       const completed = completedResponse(event);
       if (completed) return completed;
     }
-    await new Promise((resolve) => window.setTimeout(resolve, 800));
+    await new Promise((resolve, reject) => {
+      const onAbort = () => {
+        globalThis.clearTimeout(timeout);
+        reject(signal?.reason ?? new DOMException("Aborted", "AbortError"));
+      };
+      const timeout = globalThis.setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort);
+        resolve(undefined);
+      }, 800);
+      signal?.addEventListener("abort", onAbort, { once: true });
+    });
   }
   throw new Error("连接已中断，本次运行仍可稍后从运行记录中恢复");
 }
@@ -179,11 +197,13 @@ export async function streamChat(
   content: string,
   conversationId: string | null,
   onEvent?: (event: RunEvent) => void,
+  signal?: AbortSignal,
 ): Promise<ChatResponse> {
   const response = await requestWithDemoAuth(`${apiBase}/v1/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ user_key: userKey, content, conversation_id: conversationId }),
+    signal,
   });
   if (!response.ok || !response.body) return parseResponse<ChatResponse>(response);
 
@@ -215,11 +235,12 @@ export async function streamChat(
     }
   } catch (error) {
     if (terminalError) throw terminalError;
+    if (signal?.aborted) throw error;
     if (!runId) throw error;
   }
 
   if (completed) return completed;
-  if (runId) return recoverRun(runId, lastSequence, onEvent);
+  if (runId) return recoverRun(runId, lastSequence, onEvent, signal);
   throw new Error("流式响应未正常开始");
 }
 
