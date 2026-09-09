@@ -88,6 +88,10 @@ cd backend
 uv run ruff check app tests alembic
 uv run pytest -q
 uv run python -m app.evaluation.runner
+
+cd ../frontend
+npm test
+npm run build
 ```
 
 离线评测包含 36 条中文样本，默认读取已保存的千问预测快照，不调用真实 API。基线报告及刷新方式见 `backend/app/evaluation/README.md`。
@@ -136,5 +140,7 @@ curl -X POST http://127.0.0.1:8000/v1/reviews \
 ```
 
 聊天请求会先在本机脱敏，再写入消息并排队记忆提取任务；前端通过 `POST /v1/chat/stream` 消费 SSE 运行事件，最终事件携带回答和 `redacted` 元数据，可直接用于折叠提示。记忆候选由 Worker 通过结构化输出提取，普通明确信息自动生效，敏感/推断信息进入 `pending`，秘密直接丢弃。
+
+主回答结束后，前端会继续获取 Worker 写入的记忆提取终态事件，并展示新增记忆、冲突待确认或最终提取失败。运行事件与助手消息持久关联，刷新或切换会话后仍可恢复，重复回放按事件序号去重。
 
 以“请记住/忘记/把……改成……”开头的显式指令会直接进入记忆治理服务：普通事实立即生效，敏感内容进入待确认，凭据和个人号码在本机脱敏后不写入长期记忆。冲突更正先产生 `pending` 新版本；只有用户确认后旧记忆才标记为 `superseded`，撤销会恢复这对版本状态。

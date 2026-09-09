@@ -121,6 +121,7 @@ class Message(TimestampMixin, Base):
         UniqueConstraint(
             "conversation_id", "sequence", name="uq_messages_conversation_sequence"
         ),
+        UniqueConstraint("run_id", name="uq_messages_run_id"),
         Index("ix_messages_conversation_created", "conversation_id", "created_at"),
     )
 
@@ -135,11 +136,15 @@ class Message(TimestampMixin, Base):
     content: Mapped[str] = mapped_column(Text, nullable=False)
     sequence: Mapped[int] = mapped_column(Integer, nullable=False)
     is_redacted: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    run_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("runs.id", ondelete="SET NULL")
+    )
     metadata_: Mapped[dict[str, Any]] = mapped_column(
         "metadata", JSON_TYPE, default=dict, nullable=False
     )
 
     conversation: Mapped[Conversation] = relationship(back_populates="messages")
+    run: Mapped[Run | None] = relationship(foreign_keys=[run_id])
 
 
 class Run(TimestampMixin, Base):
@@ -163,7 +168,7 @@ class Run(TimestampMixin, Base):
 
     conversation: Mapped[Conversation] = relationship(back_populates="runs")
     events: Mapped[list[RunEvent]] = relationship(
-        back_populates="run", cascade="all, delete-orphan"
+        back_populates="run", cascade="all, delete-orphan", order_by="RunEvent.sequence"
     )
 
 

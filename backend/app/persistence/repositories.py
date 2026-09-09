@@ -7,6 +7,7 @@ from uuid import UUID
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.memory.retrieval import ScoredMemory, rank_memories
 from app.persistence.models import (
@@ -82,6 +83,7 @@ class ConversationRepository:
         result = await self.session.scalars(
             select(Message)
             .where(Message.conversation_id == conversation_id)
+            .options(selectinload(Message.run).selectinload(Run.events))
             .order_by(Message.sequence.desc())
             .limit(limit)
         )
@@ -114,6 +116,7 @@ class ConversationRepository:
         content: str,
         sequence: int,
         is_redacted: bool = False,
+        run_id: UUID | None = None,
     ) -> Message:
         message = Message(
             conversation_id=conversation_id,
@@ -121,6 +124,7 @@ class ConversationRepository:
             content=content,
             sequence=sequence,
             is_redacted=is_redacted,
+            run_id=run_id,
         )
         self.session.add(message)
         await self.session.execute(

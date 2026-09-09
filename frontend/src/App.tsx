@@ -26,6 +26,7 @@ import { RunDetails } from "./components/RunDetails";
 import { MemoriesPage } from "./pages/MemoriesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TimelinePage } from "./pages/TimelinePage";
+import { followRunEvents, mergeRunEvents, needsExtractionFollow } from "./runEvents";
 
 type AppView = "chat" | "memories" | "timeline" | "settings";
 
@@ -34,6 +35,7 @@ type ChatMessage = {
   role: "user" | "assistant";
   content: string;
   redacted?: boolean;
+  runId?: string;
   runEvents?: RunEvent[];
 };
 
@@ -60,6 +62,10 @@ const liveEventLabels: Record<string, string> = {
   "memory.command_applied": "已处理记忆指令",
 };
 
+function isAbortError(error: unknown): boolean {
+  return error instanceof DOMException && error.name === "AbortError";
+}
+
 function App() {
   const [view, setView] = useState<AppView>("chat");
   const [messages, setMessages] = useState<ChatMessage[]>(welcomeMessages);
@@ -80,6 +86,10 @@ function App() {
   const [memoryPanelOpen, setMemoryPanelOpen] = useState(() => window.innerWidth > 680);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const activeConversationRef = useRef<string | null>(null);
+  const conversationRequestRef = useRef(0);
+  const activeChatRef = useRef<AbortController | null>(null);
+  const runFollowersRef = useRef(new Map<string, AbortController>());
 
   const loadMemories = useCallback(async () => {
     const loaded = await fetchMemories();
@@ -92,6 +102,57 @@ function App() {
     setConversations(loaded);
     return loaded;
   }, []);
+
+  const stopRunFollowers = useCallback(() => {
+    for (const controller of runFollowersRef.current.values()) controller.abort();
+    runFollowersRef.current.clear();
+  }, []);
+
+  const stopActiveChat = useCallback(() => {
+    activeChatRef.current?.abort();
+    activeChatRef.current = null;
+    setIsSending(false);
+    setLiveEvent(null);
+  }, []);
+
+  const startRunFollower = useCallback((
+    runId: string,
+    initialEvents: RunEvent[],
+    ownerConversationId: string,
+  ) => {
+    if (!needsExtractionFollow(initialEvents) || runFollowersRef.current.has(runId)) return;
+    const controller = new AbortController();
+    runFollowersRef.current.set(runId, controller);
+    void followRunEvents({
+      runId,
+      initialEvents,
+      signal: controller.signal,
+      onUpdate: (events) => {
+        if (activeConversationRef.current !== ownerConversationId) {
+          controller.abort();
+          return;
+        }
+        setMessages((current) => current.map((message) => (
+          message.runId === runId ? { ...message, runEvents: events } : message
+        )));
+      },
+    }).then((events) => {
+      if (
+        activeConversationRef.current === ownerConversationId
+        && events.some((event) => event.event_type === "memory.extraction_completed")
+      ) {
+        void loadMemories().catch(() => setError("记忆列表刷新失败，请稍后重试"));
+      }
+    }).catch((followError) => {
+      if (!isAbortError(followError) && activeConversationRef.current === ownerConversationId) {
+        setError("异步记忆事件恢复失败，请稍后重新打开会话");
+      }
+    }).finally(() => {
+      if (runFollowersRef.current.get(runId) === controller) {
+        runFollowersRef.current.delete(runId);
+      }
+    });
+  }, [loadMemories]);
 
   const loadTimeline = useCallback(async () => {
     setPageLoading(true);
@@ -114,6 +175,11 @@ function App() {
   }, []);
 
   const selectConversation = useCallback(async (id: string) => {
+    const requestId = conversationRequestRef.current + 1;
+    conversationRequestRef.current = requestId;
+    stopActiveChat();
+    stopRunFollowers();
+    activeConversationRef.current = id;
     setError(null);
     setIsLoadingHistory(true);
     setConversationId(id);
@@ -122,22 +188,31 @@ function App() {
     localStorage.setItem(selectedConversationKey, id);
     try {
       const stored = await fetchConversationMessages(id);
-      setMessages(
-        stored
-          .filter((message) => message.role === "user" || message.role === "assistant")
-          .map((message) => ({
-            id: message.id,
-            role: message.role as "user" | "assistant",
-            content: message.content,
-            redacted: message.is_redacted,
-          })),
-      );
+      if (conversationRequestRef.current !== requestId) return;
+      const loadedMessages = stored
+        .filter((message) => message.role === "user" || message.role === "assistant")
+        .map((message) => ({
+          id: message.id,
+          role: message.role as "user" | "assistant",
+          content: message.content,
+          redacted: message.is_redacted,
+          runId: message.run_id ?? undefined,
+          runEvents: message.run_id ? mergeRunEvents(message.run_id, message.run_events) : undefined,
+        }));
+      setMessages(loadedMessages);
+      for (const message of loadedMessages) {
+        if (message.runId && message.runEvents) {
+          startRunFollower(message.runId, message.runEvents, id);
+        }
+      }
     } catch (loadError) {
-      setError(loadError instanceof Error ? loadError.message : "对话加载失败");
+      if (conversationRequestRef.current === requestId && !isAbortError(loadError)) {
+        setError(loadError instanceof Error ? loadError.message : "对话加载失败");
+      }
     } finally {
-      setIsLoadingHistory(false);
+      if (conversationRequestRef.current === requestId) setIsLoadingHistory(false);
     }
-  }, []);
+  }, [startRunFollower, stopActiveChat, stopRunFollowers]);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,7 +228,11 @@ function App() {
       }
     }
     void loadInitialData();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      activeChatRef.current?.abort();
+      for (const controller of runFollowersRef.current.values()) controller.abort();
+    };
   }, [loadConversations, loadMemories, selectConversation]);
 
   useEffect(() => {
@@ -180,12 +259,27 @@ function App() {
     setInput("");
     setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", content }]);
     setIsSending(true);
-    const runEvents: RunEvent[] = [];
+    const targetConversationId = activeConversationRef.current;
+    const controller = new AbortController();
+    activeChatRef.current = controller;
+    let runEvents: RunEvent[] = [];
     try {
-      const response = await streamChat(content, conversationId, (event) => {
-        runEvents.push(event);
+      const response = await streamChat(content, targetConversationId, (event) => {
+        if (
+          activeChatRef.current !== controller
+          || activeConversationRef.current !== targetConversationId
+        ) return;
+        if (event.run_id) {
+          runEvents = mergeRunEvents(event.run_id, runEvents, [event]);
+        }
         setLiveEvent(liveEventLabels[event.event_type] ?? null);
-      });
+      }, controller.signal);
+      if (
+        activeChatRef.current !== controller
+        || activeConversationRef.current !== targetConversationId
+      ) return;
+      runEvents = mergeRunEvents(response.run_id, runEvents);
+      activeConversationRef.current = response.conversation_id;
       setConversationId(response.conversation_id);
       localStorage.setItem(selectedConversationKey, response.conversation_id);
       setMessages((current) => [...current, {
@@ -193,15 +287,22 @@ function App() {
         role: "assistant",
         content: response.message,
         redacted: response.redacted,
+        runId: response.run_id,
         runEvents: [...runEvents],
       }]);
+      startRunFollower(response.run_id, runEvents, response.conversation_id);
       await Promise.all([loadMemories(), loadConversations()]);
     } catch (sendError) {
-      setError(sendError instanceof Error ? sendError.message : "请求失败，请重试");
+      if (!isAbortError(sendError)) {
+        setError(sendError instanceof Error ? sendError.message : "请求失败，请重试");
+      }
     } finally {
-      setIsSending(false);
-      setLiveEvent(null);
-      textareaRef.current?.focus();
+      if (activeChatRef.current === controller) {
+        activeChatRef.current = null;
+        setIsSending(false);
+        setLiveEvent(null);
+        textareaRef.current?.focus();
+      }
     }
   }
 
@@ -239,6 +340,10 @@ function App() {
   }
 
   function resetConversation() {
+    conversationRequestRef.current += 1;
+    stopActiveChat();
+    stopRunFollowers();
+    activeConversationRef.current = null;
     setView("chat");
     setMessages(welcomeMessages);
     setConversationId(null);
