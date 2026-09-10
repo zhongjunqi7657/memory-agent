@@ -54,9 +54,9 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。普通聊天冲突会进入待确认，重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取和 Embedding 补偿任务。
+首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。异步记忆事件展示已完成验收；当前进入普通聊天冲突治理，重点修复缺少字面重合时的语义冲突漏检。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取和 Embedding 补偿任务。
 
-Graph 提供 `search_memory`、`get_user_timeline`、`propose_memory_update` 三个受控工具及循环上限，使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用持久摘要与 Token 预算。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。详细状态图、ER 图和面试说明见 [架构文档](docs/architecture.md)、[演示流程](docs/demo-script.md) 与 [面试问答](docs/interview-guide.md)。
+Graph 提供 `search_memory`、`get_user_timeline`、`propose_memory_update` 三个受控工具及循环上限，使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用持久摘要与 Token 预算。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。当前进度和下一步验收边界见 [开发状态](docs/development-status.md)；详细状态图、ER 图和面试说明见 [架构文档](docs/architecture.md)、[演示流程](docs/demo-script.md) 与 [面试问答](docs/interview-guide.md)。
 
 ## 本地运行
 
