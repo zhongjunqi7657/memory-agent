@@ -328,6 +328,33 @@ class MemoryRepository:
         recency_half_life_days: int = 30,
         min_relevance_score: float = 0.08,
     ) -> list[ScoredMemory]:
+        candidates = await self.list_active_search_candidates(
+            user_id,
+            query_embedding=query_embedding,
+            limit=limit,
+        )
+
+        return rank_memories(
+            candidates,
+            query,
+            query_embedding=query_embedding,
+            vector_weight=vector_weight,
+            keyword_weight=keyword_weight,
+            recency_weight=recency_weight,
+            importance_weight=importance_weight,
+            type_weight=type_weight,
+            recency_half_life_days=recency_half_life_days,
+            min_relevance_score=min_relevance_score,
+            limit=limit,
+        )
+
+    async def list_active_search_candidates(
+        self,
+        user_id: UUID,
+        *,
+        query_embedding: list[float] | None,
+        limit: int,
+    ) -> list[Memory]:
         candidate_limit = max(limit * 10, 50)
         active_filter = (
             Memory.user_id == user_id,
@@ -354,20 +381,7 @@ class MemoryRepository:
             candidates.update(
                 (memory.id, memory) for memory in vector_candidates.all()
             )
-
-        return rank_memories(
-            list(candidates.values()),
-            query,
-            query_embedding=query_embedding,
-            vector_weight=vector_weight,
-            keyword_weight=keyword_weight,
-            recency_weight=recency_weight,
-            importance_weight=importance_weight,
-            type_weight=type_weight,
-            recency_half_life_days=recency_half_life_days,
-            min_relevance_score=min_relevance_score,
-            limit=limit,
-        )
+        return list(candidates.values())
 
     async def list_timeline(self, user_id: UUID, *, limit: int = 100) -> list[Memory]:
         result = await self.session.scalars(

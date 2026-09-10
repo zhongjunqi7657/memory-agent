@@ -6,6 +6,7 @@ from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace
 
 from app.evaluation.schemas import EvaluationDataset, PredictionSnapshot
+from app.memory.conflicts import rank_conflict_candidates
 from app.memory.policy import MemoryCandidate, MemoryDecision, assess_candidate
 from app.memory.retrieval import rank_memories
 
@@ -147,16 +148,22 @@ def evaluate_retrieval(
             for item in case.memories
             if item.owner == "target" and item.status == "active"
         ]
-        ranked = rank_memories(
-            [
-                SimpleNamespace(
-                    id=item.id,
-                    content=item.content,
-                    embedding=item.embedding,
-                    updated_at=now - timedelta(seconds=index),
-                )
-                for index, item in enumerate(eligible)
-            ],
+        memories = [
+            SimpleNamespace(
+                id=item.id,
+                content=item.content,
+                embedding=item.embedding,
+                updated_at=now - timedelta(seconds=index),
+            )
+            for index, item in enumerate(eligible)
+        ]
+        ranker = (
+            rank_conflict_candidates
+            if case.category == "conflict"
+            else rank_memories
+        )
+        ranked = ranker(
+            memories,
             case.query,
             query_embedding=case.query_embedding,
             limit=case.limit,
