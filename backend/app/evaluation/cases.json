@@ -230,10 +230,11 @@
       "category": "conflict",
       "query": "我已经搬到上海生活了",
       "memories": [
-        {"id": "c3-old", "content": "用户目前住在北京"},
-        {"id": "c3-noise", "content": "用户喜欢读科幻小说"}
+        {"id": "c3-old", "content": "用户目前住在北京", "embedding": [1.0, 0.0]},
+        {"id": "c3-noise", "content": "用户喜欢读科幻小说", "embedding": [0.0, 1.0]}
       ],
       "expected_ids": ["c3-old"],
+      "query_embedding": [1.0, 0.0],
       "limit": 1
     },
     {

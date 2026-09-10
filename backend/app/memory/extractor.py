@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import get_settings
+from app.memory.conflicts import ConflictCandidateSelector
 from app.memory.policy import MemoryCandidate
 from app.memory.service import MemoryService
 from app.models.qwen import create_chat_model, create_embedding_model
@@ -44,7 +45,8 @@ EXTRACTION_PROMPT = """你负责从用户消息中提取可长期复用的事实
 content 用简洁中文陈述；kind 只能是 semantic（稳定偏好、目标、自我描述）或 episodic（带时间的经历）。
 不确定或敏感内容保留候选并降低 confidence，由代码决定是否需要用户确认。
 importance 表示未来复用价值，范围 0 到 1。若新事实与给出的已有记忆冲突，将其 ID 放入 contradicts_memory_ids；
-同一类稳定事实使用相同 canonical_key。没有候选时返回空 memories。"""
+同一类稳定事实使用相同 canonical_key。“优先冲突候选”只表示语义相关，不等于事实冲突；
+只有新旧稳定事实不能同时成立或同一属性已经改变时才标记旧 ID，补充事实和无关事实不得标记。没有候选时返回空 memories。"""
 REPAIR_PROMPT = """上一次结构化结果未通过 Schema 校验。请重新从原始用户消息提取，
 只返回符合指定 Schema 的结果；不要补充用户没有表达的事实。"""
 _AUTO_EMBEDDING = object()
@@ -80,14 +82,29 @@ class MemoryExtractor:
             .limit(50)
         )
         active_memories = list(active_result)
-        inventory = "\n".join(
-            f"- id={memory.id}; canonical_key={memory.canonical_key or '-'}; "
-            f"content={memory.content}"
-            for memory in active_memories
-        )
+        conflict_candidates = []
+        if active_memories:
+            conflict_candidates = await ConflictCandidateSelector(
+                self.session,
+                embedding_model=self.embedding_model,
+                business=self.business,
+            ).select(user_id=user_id, query=message.content)
+        priority_memories = [item.memory for item in conflict_candidates]
+        priority_ids = {memory.id for memory in priority_memories}
+        other_memories = [
+            memory for memory in active_memories if memory.id not in priority_ids
+        ]
         prompt = EXTRACTION_PROMPT
-        if inventory:
-            prompt = f"{prompt}\n\n已有 active 记忆：\n{inventory}"
+        if priority_memories:
+            prompt = (
+                f"{prompt}\n\n优先冲突候选：\n"
+                f"{_format_inventory(priority_memories)}"
+            )
+        if other_memories:
+            prompt = (
+                f"{prompt}\n\n其他已有 active 记忆：\n"
+                f"{_format_inventory(other_memories)}"
+            )
         messages = [
             SystemMessage(content=prompt),
             HumanMessage(content=message.content),
@@ -125,3 +142,11 @@ class MemoryExtractor:
             if memory:
                 stored.append(memory)
         return stored
+
+
+def _format_inventory(memories: list[Memory]) -> str:
+    return "\n".join(
+        f"- id={memory.id}; canonical_key={memory.canonical_key or '-'}; "
+        f"content={memory.content}"
+        for memory in memories
+    )

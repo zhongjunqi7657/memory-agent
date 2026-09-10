@@ -153,6 +153,40 @@ async def test_confirming_conflict_supersedes_previous_version():
 
 
 @pytest.mark.asyncio
+async def test_rejecting_conflict_keeps_previous_version_active() -> None:
+    user_id = uuid4()
+    previous = Memory(
+        id=uuid4(),
+        user_id=user_id,
+        content="用户偏好早晨学习",
+        status=MemoryStatus.ACTIVE,
+        kind=MemoryKind.SEMANTIC,
+        sensitivity=MemorySensitivity.NORMAL,
+        confidence=0.95,
+        importance=0.8,
+    )
+    pending = Memory(
+        id=uuid4(),
+        user_id=user_id,
+        content="用户偏好晚上学习",
+        status=MemoryStatus.PENDING,
+        kind=MemoryKind.SEMANTIC,
+        sensitivity=MemorySensitivity.NORMAL,
+        confidence=0.96,
+        importance=0.9,
+        metadata_={"conflicts_with": [str(previous.id)]},
+    )
+
+    await MemoryService(FakeSession()).update_memory(
+        pending, status=MemoryStatus.REJECTED
+    )
+
+    assert pending.status is MemoryStatus.REJECTED
+    assert previous.status is MemoryStatus.ACTIVE
+    assert previous.superseded_by_id is None
+
+
+@pytest.mark.asyncio
 async def test_repeated_evidence_merges_source_ids_without_duplicate_memory():
     user_id = uuid4()
     first_source = uuid4()

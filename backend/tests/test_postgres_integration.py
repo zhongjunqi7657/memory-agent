@@ -29,6 +29,8 @@ from app.config.business import get_business_config
 from app.config.settings import Settings
 from app.jobs import worker
 from app.main import app
+from app.memory.extractor import ExtractedMemory, ExtractionResult, MemoryExtractor
+from app.memory.service import MemoryService
 from app.persistence.db import get_session, get_session_factory
 from app.persistence.models import (
     ExtractionJob,
@@ -210,6 +212,145 @@ async def test_migrated_schema_vector_io_and_worker_locking(
     finally:
         async with postgres_factory() as session, session.begin():
             await session.execute(delete(User).where(User.external_key == external_key))
+
+
+@pytest.mark.asyncio
+async def test_postgres_ordinary_chat_conflict_lifecycle(
+    postgres_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    external_key = f"postgres-conflict-{uuid4()}"
+    foreign_key = f"postgres-conflict-foreign-{uuid4()}"
+    vector = [1.0, *([0.0] * 1023)]
+    unrelated_vector = [0.0, 1.0, *([0.0] * 1022)]
+
+    class ConflictModel:
+        def __init__(self, previous_id) -> None:
+            self.previous_id = previous_id
+            self.prompts: list[str] = []
+
+        def with_structured_output(self, _schema):
+            return self
+
+        async def ainvoke(self, messages):
+            self.prompts.append("\n".join(str(item.content) for item in messages))
+            return ExtractionResult(
+                memories=[
+                    ExtractedMemory(
+                        content="用户目前住在上海",
+                        kind=MemoryKind.SEMANTIC,
+                        confidence=0.98,
+                        contradicts_memory_ids=[self.previous_id],
+                    )
+                ]
+            )
+
+    class EmbeddingModel:
+        async def aembed_query(self, _query):
+            return vector
+
+    try:
+        async with postgres_factory() as session, session.begin():
+            repository = ConversationRepository(session)
+            user = await repository.get_or_create_user(external_key)
+            foreign_user = await repository.get_or_create_user(foreign_key)
+            conversation = await repository.create_conversation(user.id)
+            message = await repository.add_message(
+                conversation.id,
+                role=MessageRole.USER,
+                content="我已经搬到上海生活了",
+                sequence=1,
+            )
+            previous = Memory(
+                user_id=user.id,
+                kind=MemoryKind.SEMANTIC,
+                status=MemoryStatus.ACTIVE,
+                sensitivity=MemorySensitivity.NORMAL,
+                content="用户目前住在北京",
+                confidence=Decimal("0.980"),
+                importance=Decimal("0.900"),
+                embedding=vector,
+            )
+            unrelated = Memory(
+                user_id=user.id,
+                kind=MemoryKind.SEMANTIC,
+                status=MemoryStatus.ACTIVE,
+                sensitivity=MemorySensitivity.NORMAL,
+                content="用户喜欢读科幻小说",
+                confidence=Decimal("0.950"),
+                importance=Decimal("0.800"),
+                embedding=unrelated_vector,
+            )
+            pending = Memory(
+                user_id=user.id,
+                kind=MemoryKind.SEMANTIC,
+                status=MemoryStatus.PENDING,
+                sensitivity=MemorySensitivity.NORMAL,
+                content="用户可能住在杭州",
+                confidence=Decimal("0.800"),
+                importance=Decimal("0.500"),
+                embedding=vector,
+            )
+            deleted = Memory(
+                user_id=user.id,
+                kind=MemoryKind.SEMANTIC,
+                status=MemoryStatus.DELETED,
+                sensitivity=MemorySensitivity.NORMAL,
+                content="用户曾住在广州",
+                confidence=Decimal("0.950"),
+                importance=Decimal("0.500"),
+                embedding=vector,
+            )
+            foreign = Memory(
+                user_id=foreign_user.id,
+                kind=MemoryKind.SEMANTIC,
+                status=MemoryStatus.ACTIVE,
+                sensitivity=MemorySensitivity.NORMAL,
+                content="用户目前住在上海",
+                confidence=Decimal("0.990"),
+                importance=Decimal("0.900"),
+                embedding=vector,
+            )
+            session.add_all([previous, unrelated, pending, deleted, foreign])
+            await session.flush()
+
+            model = ConflictModel(previous.id)
+            extracted = await MemoryExtractor(
+                session,
+                model=model,
+                embedding_model=EmbeddingModel(),
+            ).extract_and_store(user_id=user.id, message=message)
+
+            assert len(extracted) == 1
+            replacement = extracted[0]
+            assert replacement.status is MemoryStatus.PENDING
+            assert replacement.metadata_["conflicts_with"] == [str(previous.id)]
+            assert previous.status is MemoryStatus.ACTIVE
+            assert model.prompts[0].count(str(previous.id)) == 1
+            assert str(pending.id) not in model.prompts[0]
+            assert str(deleted.id) not in model.prompts[0]
+            assert str(foreign.id) not in model.prompts[0]
+
+            await MemoryService(session).update_memory(
+                replacement, status=MemoryStatus.ACTIVE
+            )
+            assert previous.status is MemoryStatus.SUPERSEDED
+            assert previous.superseded_by_id == replacement.id
+
+            await MemoryService(session).undo(replacement)
+            assert replacement.status is MemoryStatus.PENDING
+            assert previous.status is MemoryStatus.ACTIVE
+            assert previous.superseded_by_id is None
+
+            await MemoryService(session).update_memory(
+                replacement, status=MemoryStatus.REJECTED
+            )
+            assert replacement.status is MemoryStatus.REJECTED
+            assert previous.status is MemoryStatus.ACTIVE
+    finally:
+        async with postgres_factory() as session, session.begin():
+            await session.execute(
+                delete(User).where(User.external_key.in_([external_key, foreign_key]))
+            )
 
 
 @pytest.mark.asyncio

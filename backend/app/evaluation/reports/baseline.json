@@ -13,12 +13,12 @@
   "retrieval": {
     "precision": 0.9167,
     "recall": 0.8462,
-    "conflict_interception_rate": 0.8,
+    "conflict_interception_rate": 1.0,
     "deletion_residual_rate": 0.0,
     "cross_user_leak_rate": 0.0,
-    "embedding_fallback_ratio": 0.8636
+    "embedding_fallback_ratio": 0.8182
   },
-  "known_failure_count": 5,
+  "known_failure_count": 4,
   "known_failures": [
     {
       "case_id": "extract-fact-05",
@@ -74,14 +74,6 @@
       "category": "recall",
       "expected": [
         "r9-target"
-      ],
-      "actual": []
-    },
-    {
-      "case_id": "conflict-03",
-      "category": "conflict",
-      "expected": [
-        "c3-old"
       ],
       "actual": []
     }
