@@ -24,6 +24,7 @@ pending_confidence_threshold = 0.5
 recent_turns = 8
 max_tool_rounds = 4
 context_token_budget = 6000
+context_system_reserve_tokens = 200
 summary_trigger_tokens = 4800
 summary_refresh_messages = 6
 summary_max_chars = 1200

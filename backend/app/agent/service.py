@@ -15,6 +15,7 @@ from app.agent.tools import create_memory_tools
 from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import Settings, get_settings
 from app.memory.commands import MemoryCommandType, parse_memory_command
+from app.memory.embeddings import embed_text, embedding_fallback_payload
 from app.memory.service import MemoryService
 from app.models.qwen import create_chat_model, create_embedding_model
 from app.persistence.models import MemoryStatus, MessageRole, RunStatus
@@ -255,15 +256,29 @@ class AgentService:
                 await finish_failure(error)
                 raise
 
-        query_embedding = None
-        if self.embedding_model:
-            try:
-                query_embedding = await self.embedding_model.aembed_query(redaction.text)
-                await emit(
-                    "memory.embedding_ready", {"dimensions": len(query_embedding)}
-                )
-            except Exception:  # noqa: BLE001 - retrieval must fall back safely
-                await emit("memory.embedding_fallback")
+        embedding_attempt = await embed_text(
+            self.embedding_model,
+            redaction.text,
+            expected_dimensions=self.business.models.embedding_dimensions,
+        )
+        query_embedding = embedding_attempt.vector
+        if embedding_attempt.ready:
+            await emit(
+                "memory.embedding_ready",
+                {
+                    "dimensions": len(query_embedding or []),
+                    "model": self.business.models.embedding_model,
+                },
+            )
+        else:
+            await emit(
+                "memory.embedding_fallback",
+                embedding_fallback_payload(
+                    embedding_attempt,
+                    expected_dimensions=self.business.models.embedding_dimensions,
+                    source="automatic_retrieval",
+                ),
+            )
         scored_memories = await MemoryRepository(self.session).search_hybrid(
             user.id,
             redaction.text,
@@ -276,16 +291,25 @@ class AgentService:
             type_weight=self.business.memory.type_weight,
             recency_half_life_days=self.business.memory.recency_half_life_days,
             min_relevance_score=self.business.memory.min_relevance_score,
+            embedding_model_name=self.business.models.embedding_model,
+            embedding_dimensions=self.business.models.embedding_dimensions,
         )
         injected: list = []
         injected_tokens = 0
+        current_input_tokens = estimate_tokens(redaction.text) + 4
+        injection_budget = max(
+            0,
+            min(
+                self.business.memory.max_injected_tokens,
+                self.business.agent.context_token_budget
+                - self.business.agent.context_system_reserve_tokens
+                - current_input_tokens,
+            ),
+        )
         for item in scored_memories:
             item_tokens = estimate_tokens(item.memory.content) + 4
-            if injected and (
-                injected_tokens + item_tokens
-                > self.business.memory.max_injected_tokens
-            ):
-                break
+            if injected_tokens + item_tokens > injection_budget:
+                continue
             injected.append(item)
             injected_tokens += item_tokens
         scored_memories = injected
@@ -332,7 +356,10 @@ class AgentService:
                 {
                     "message_count": len(context.messages),
                     "estimated_tokens": context.estimated_tokens,
+                    "budget": self.business.agent.context_token_budget,
+                    "reserved_tokens": context.reserved_tokens,
                     "summary_used": bool(context.summary),
+                    "truncated": context.truncated,
                 },
             )
             if context.summarized:

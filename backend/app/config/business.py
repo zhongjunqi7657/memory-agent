@@ -40,6 +40,7 @@ class AgentConfig(BaseModel):
     recent_turns: int = Field(default=8, ge=1, le=50)
     max_tool_rounds: int = Field(default=4, ge=0, le=10)
     context_token_budget: int = Field(default=6000, ge=500, le=100000)
+    context_system_reserve_tokens: int = Field(default=200, ge=0, le=10000)
     summary_trigger_tokens: int = Field(default=4800, ge=200, le=100000)
     summary_refresh_messages: int = Field(default=6, ge=1, le=100)
     summary_max_chars: int = Field(default=1200, ge=100, le=10000)

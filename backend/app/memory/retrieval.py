@@ -8,6 +8,9 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING
 
+from app.config.business import ModelConfig
+from app.memory.embeddings import embedding_is_current
+
 if TYPE_CHECKING:
     from app.persistence.models import Memory
 
@@ -87,14 +90,30 @@ def rank_memories(
     type_weight: float = 0.05,
     recency_half_life_days: int = 30,
     min_relevance_score: float = 0.08,
+    embedding_model_name: str | None = None,
+    embedding_dimensions: int | None = None,
     now: datetime | None = None,
     limit: int = 5,
 ) -> list[ScoredMemory]:
     """Rank candidates by relevance, freshness, importance and memory type."""
 
     now = now or datetime.now(timezone.utc)
+    embedding_config = None
+    if embedding_model_name and embedding_dimensions:
+        embedding_config = ModelConfig(
+            embedding_model=embedding_model_name,
+            embedding_dimensions=embedding_dimensions,
+        )
+
+    def current_embedding(memory: Memory) -> list[float] | None:
+        if embedding_config and not embedding_is_current(
+            memory, config=embedding_config
+        ):
+            return None
+        return memory.embedding
+
     has_vectors = query_embedding is not None and any(
-        memory.embedding for memory in memories
+        current_embedding(memory) is not None for memory in memories
     )
     vector_weight = vector_weight if has_vectors else 0.0
     total_weight = sum(
@@ -112,7 +131,9 @@ def rank_memories(
     for memory in memories:
         keyword_score = keyword_similarity(query, memory.content)
         vector_score = (
-            cosine_similarity(memory.embedding, query_embedding) if has_vectors else 0.0
+            cosine_similarity(current_embedding(memory), query_embedding)
+            if has_vectors
+            else 0.0
         )
         memory_recency_score = recency_score(
             getattr(memory, "updated_at", None),

@@ -11,6 +11,7 @@ from langchain_core.tools import BaseTool, tool
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.business import BusinessConfig
+from app.memory.embeddings import embed_text, embedding_fallback_payload
 from app.memory.service import MemoryService
 from app.persistence.models import MemoryKind
 from app.persistence.repositories import MemoryRepository
@@ -43,14 +44,21 @@ def create_memory_tools(
             "tool.started",
             {"tool": "search_memory", "query_length": len(safe_query)},
         )
-        query_embedding = None
-        if embedding_model:
-            try:
-                query_embedding = await embedding_model.aembed_query(safe_query)
-            except Exception:  # noqa: BLE001 - keyword retrieval remains available
-                await publish(
-                    "memory.embedding_fallback", {"source": "search_memory"}
-                )
+        embedding_attempt = await embed_text(
+            embedding_model,
+            safe_query,
+            expected_dimensions=business.models.embedding_dimensions,
+        )
+        query_embedding = embedding_attempt.vector
+        if not embedding_attempt.ready:
+            await publish(
+                "memory.embedding_fallback",
+                embedding_fallback_payload(
+                    embedding_attempt,
+                    expected_dimensions=business.models.embedding_dimensions,
+                    source="search_memory",
+                ),
+            )
         matches = await MemoryRepository(session).search_hybrid(
             user_id,
             safe_query,
@@ -63,6 +71,8 @@ def create_memory_tools(
             type_weight=business.memory.type_weight,
             recency_half_life_days=business.memory.recency_half_life_days,
             min_relevance_score=business.memory.min_relevance_score,
+            embedding_model_name=business.models.embedding_model,
+            embedding_dimensions=business.models.embedding_dimensions,
         )
         payload = [
             {

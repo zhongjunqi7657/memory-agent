@@ -16,6 +16,7 @@ def memory(
     kind: str = "semantic",
     importance: float = 0.5,
     updated_at: datetime | None = None,
+    metadata: dict[str, object] | None = None,
 ):
     return SimpleNamespace(
         content=content,
@@ -23,6 +24,7 @@ def memory(
         kind=kind,
         importance=importance,
         updated_at=updated_at or datetime.now(timezone.utc),
+        metadata_=metadata or {},
     )
 
 
@@ -60,6 +62,24 @@ def test_hybrid_ranking_can_use_semantic_signal() -> None:
     )
     assert ranked[0].memory.content == "我在学习后端工程"
     assert "语义向量" in ranked[0].reason
+
+
+def test_hybrid_ranking_ignores_known_stale_embedding() -> None:
+    stale = memory(
+        "用户正在学习后端工程",
+        [1.0, 0.0],
+        metadata={"embedding_status": "pending"},
+    )
+
+    ranked = rank_memories(
+        [stale],
+        "关系型数据库",
+        query_embedding=[1.0, 0.0],
+        embedding_model_name="embedding-a",
+        embedding_dimensions=2,
+    )
+
+    assert ranked == []
 
 
 def test_complete_ranking_uses_recency_importance_and_memory_type() -> None:

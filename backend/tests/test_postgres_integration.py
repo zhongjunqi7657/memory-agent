@@ -29,6 +29,7 @@ from app.config.business import get_business_config
 from app.config.settings import Settings
 from app.jobs import worker
 from app.main import app
+from app.memory.embeddings import embedding_content_version
 from app.memory.extractor import ExtractedMemory, ExtractionResult, MemoryExtractor
 from app.memory.service import MemoryService
 from app.persistence.db import get_session, get_session_factory
@@ -209,6 +210,97 @@ async def test_migrated_schema_vector_io_and_worker_locking(
             assert claimed_job is not None
             assert claimed_job.status is ExtractionJobStatus.RUNNING
             assert claimed_job.locked_by == "test-worker"
+    finally:
+        async with postgres_factory() as session, session.begin():
+            await session.execute(delete(User).where(User.external_key == external_key))
+
+
+@pytest.mark.asyncio
+async def test_embedding_worker_skips_stale_content_version(
+    postgres_factory: async_sessionmaker[AsyncSession], monkeypatch
+) -> None:
+    external_key = f"postgres-embedding-version-{uuid4()}"
+    original = "用户偏好先理解原理"
+    updated = "用户偏好直接看示例"
+    vector = [1.0, *([0.0] * 1023)]
+
+    class RecordingEmbeddingModel:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        async def aembed_query(self, query: str):
+            self.queries.append(query)
+            return vector
+
+    model = RecordingEmbeddingModel()
+    business = get_business_config()
+    try:
+        async with postgres_factory() as session, session.begin():
+            repository = ConversationRepository(session)
+            user = await repository.get_or_create_user(external_key)
+            conversation = await repository.create_conversation(user.id)
+            message = await repository.add_message(
+                conversation.id,
+                role=MessageRole.USER,
+                content=original,
+                sequence=1,
+            )
+            memory = Memory(
+                user_id=user.id,
+                kind=MemoryKind.SEMANTIC,
+                status=MemoryStatus.ACTIVE,
+                sensitivity=MemorySensitivity.NORMAL,
+                content=original,
+                confidence=Decimal("1.000"),
+                source_message_id=message.id,
+                source_message_ids=[str(message.id)],
+                conversation_id=conversation.id,
+                metadata_={"embedding_status": "pending"},
+            )
+            session.add(memory)
+            await session.flush()
+            stale_job = await repository.queue_embedding_job(
+                memory=memory,
+                message_id=message.id,
+                conversation_id=conversation.id,
+                embedding_model=business.models.embedding_model,
+                embedding_dimensions=business.models.embedding_dimensions,
+            )
+            memory.content = updated
+            memory_id = memory.id
+            stale_job_id = stale_job.id
+
+        monkeypatch.setattr(worker, "SessionFactory", postgres_factory)
+        monkeypatch.setattr(worker, "create_embedding_model", lambda **_kwargs: model)
+
+        assert await worker.process_one() is True
+        assert model.queries == []
+        assert await worker.process_one() is True
+        assert model.queries == [updated]
+
+        async with postgres_factory() as session:
+            stored = await session.get(Memory, memory_id)
+            stale_job = await session.get(ExtractionJob, stale_job_id)
+            assert stored is not None
+            jobs = list(
+                (
+                    await session.scalars(
+                        select(ExtractionJob).where(
+                            ExtractionJob.user_id == stored.user_id,
+                            ExtractionJob.payload["job_type"].astext
+                            == "embedding_backfill",
+                        )
+                    )
+                ).all()
+            )
+
+        assert list(stored.embedding) == vector
+        assert stored.metadata_["embedding_content_version"] == (
+            embedding_content_version(updated)
+        )
+        assert stale_job.status is ExtractionJobStatus.COMPLETED
+        assert len(jobs) == 2
+        assert all(job.status is ExtractionJobStatus.COMPLETED for job in jobs)
     finally:
         async with postgres_factory() as session, session.begin():
             await session.execute(delete(User).where(User.external_key == external_key))
@@ -471,6 +563,7 @@ async def test_sse_chat_recalls_memory_across_conversations(
         assert recalled.status_code == 200
         assert event_types == [
             "run.started",
+            "memory.embedding_fallback",
             "memory.retrieved",
             "session.loaded",
             "model.completed",
@@ -478,15 +571,37 @@ async def test_sse_chat_recalls_memory_across_conversations(
             "run.completed",
         ]
         assert completed["payload"]["memory_count"] == 1
+        assert events[1]["payload"] == {
+            "source": "automatic_retrieval",
+            "reason": "provider_unavailable",
+            "expected_dimensions": 1024,
+        }
+        loaded_event = next(
+            event for event in events if event["event_type"] == "session.loaded"
+        )
+        assert loaded_event["payload"]["estimated_tokens"] <= (
+            loaded_event["payload"]["budget"]
+        )
         assert "用户的学习方式是通过实例学习" in model.prompts[-1]
         assert model_factory_calls == 2
         assert replayed.status_code == 200
-        assert [event["sequence"] for event in replayed.json()] == [2, 3, 4, 5, 6, 7]
+        assert [event["sequence"] for event in replayed.json()] == [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+        ]
         assert replayed.json()[-1] == {
             "run_id": completed["run_id"],
-            "sequence": 7,
+            "sequence": 8,
             "event_type": "memory.extraction_completed",
-            "payload": {"changes": []},
+            "payload": {
+                "changes": [],
+                "embedding": {"ready": 0, "pending": 0, "unavailable": 0},
+            },
         }
         assert restored.status_code == 200
         restored_assistant = [

@@ -126,3 +126,63 @@ async def test_summary_refresh_only_sends_messages_after_summary_cursor() -> Non
     assert "第 1 轮学习记录" not in prompt
     assert "第 2 轮学习记录" not in prompt
     assert conversation.summary_through_sequence == 4
+
+
+@pytest.mark.asyncio
+async def test_context_never_exceeds_budget_with_reserved_memory_tokens() -> None:
+    conversation = SimpleNamespace(
+        summary="用户正在持续学习后端工程。" * 30,
+        summary_through_sequence=2,
+    )
+    messages = [
+        message(1, MessageRole.USER, "较早消息" * 80),
+        message(2, MessageRole.USER, "当前问题" * 80),
+    ]
+
+    context = await prepare_conversation_context(
+        FakeSession(),
+        conversation=conversation,
+        messages=messages,
+        chat_model=SummaryModel(),
+        config=AgentConfig(
+            recent_turns=2,
+            context_token_budget=500,
+            context_system_reserve_tokens=120,
+            summary_trigger_tokens=500,
+        ),
+        reserved_tokens=180,
+    )
+
+    assert context.estimated_tokens <= 500
+    assert context.reserved_tokens == 180
+    assert context.truncated is True
+    assert context.messages[-1].content
+
+
+@pytest.mark.asyncio
+async def test_summary_refresh_advances_only_through_bounded_batch() -> None:
+    conversation = SimpleNamespace(summary=None, summary_through_sequence=0)
+    messages = [
+        message(index, MessageRole.USER, f"第 {index} 轮" + "学习记录" * 45)
+        for index in range(1, 9)
+    ]
+    model = SummaryModel()
+
+    await prepare_conversation_context(
+        FakeSession(),
+        conversation=conversation,
+        messages=messages,
+        chat_model=model,
+        config=AgentConfig(
+            recent_turns=2,
+            context_token_budget=500,
+            context_system_reserve_tokens=100,
+            summary_trigger_tokens=200,
+            summary_refresh_messages=2,
+        ),
+    )
+
+    assert 0 < conversation.summary_through_sequence < 6
+    prompt = str(model.messages[0][1].content)
+    assert f"第 {conversation.summary_through_sequence} 轮" in prompt
+    assert f"第 {conversation.summary_through_sequence + 1} 轮" not in prompt

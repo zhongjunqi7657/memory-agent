@@ -10,6 +10,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.business import BusinessConfig, get_business_config
+from app.memory.embeddings import (
+    embed_text,
+    mark_embedding_pending,
+    mark_embedding_ready,
+    mark_embedding_unavailable,
+)
 from app.memory.policy import MemoryCandidate, MemoryDecision, assess_candidate
 from app.persistence.models import Memory, MemoryKind, MemoryStatus
 from app.persistence.repositories import MemoryRepository
@@ -113,17 +119,24 @@ class MemoryService:
                 "conflicts_with": [str(item.id) for item in conflicts],
             },
         )
-        if self.embedding_model:
-            try:
-                embedding = await self.embedding_model.aembed_query(assessment.content)
-                if len(embedding) == self.business.models.embedding_dimensions:
-                    memory.embedding = embedding
-                    memory.metadata_["embedding_status"] = "ready"
-                else:
-                    memory.metadata_["embedding_status"] = "pending"
-            except Exception:  # noqa: BLE001 - text memory remains usable without vectors
-                memory.embedding = None
-                memory.metadata_["embedding_status"] = "pending"
+        embedding_attempt = await embed_text(
+            self.embedding_model,
+            assessment.content,
+            expected_dimensions=self.business.models.embedding_dimensions,
+        )
+        if embedding_attempt.ready:
+            memory.embedding = embedding_attempt.vector
+            memory.metadata_ = mark_embedding_ready(
+                memory.metadata_,
+                content=assessment.content,
+                model=self.business.models.embedding_model,
+                dimensions=self.business.models.embedding_dimensions,
+            )
+        elif embedding_attempt.reason == "provider_unavailable":
+            memory.metadata_ = mark_embedding_unavailable(memory.metadata_)
+        else:
+            memory.embedding = None
+            memory.metadata_ = mark_embedding_pending(memory.metadata_)
         self.session.add(memory)
         await self.session.flush()
         if status is MemoryStatus.ACTIVE and candidate.canonical_key:
@@ -262,7 +275,7 @@ class MemoryService:
                 raise ValueError("包含私密凭据的内容不能保存为长期记忆")
             memory.content = assessment.content
             memory.embedding = None
-            metadata["embedding_status"] = "pending"
+            metadata = mark_embedding_pending(metadata)
         if importance is not None:
             memory.importance = Decimal(str(max(0.0, min(1.0, importance))))
         memory.metadata_ = metadata
@@ -282,7 +295,7 @@ class MemoryService:
         restored_content = str(snapshot["content"])
         if restored_content != memory.content:
             memory.embedding = None
-            metadata["embedding_status"] = "pending"
+            metadata = mark_embedding_pending(metadata)
         memory.content = restored_content
         memory.importance = Decimal(str(snapshot["importance"]))
         memory.metadata_ = metadata

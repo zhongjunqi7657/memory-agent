@@ -11,6 +11,12 @@ from sqlalchemy import and_, case, or_, select
 from sqlalchemy.orm import selectinload
 
 from app.config.business import get_business_config
+from app.memory.embeddings import (
+    embed_text,
+    embedding_is_current,
+    embedding_job_matches,
+    mark_embedding_ready,
+)
 from app.memory.extractor import MemoryExtractor
 from app.models.qwen import create_embedding_model
 from app.persistence.db import SessionFactory
@@ -80,7 +86,21 @@ async def record_extraction_completed(
         payload={
             "changes": [
                 _memory_change(memory, job.message_id) for memory in memories
-            ]
+            ],
+            "embedding": {
+                "ready": sum(
+                    memory.metadata_.get("embedding_status") == "ready"
+                    for memory in memories
+                ),
+                "pending": sum(
+                    memory.metadata_.get("embedding_status") == "pending"
+                    for memory in memories
+                ),
+                "unavailable": sum(
+                    memory.metadata_.get("embedding_status") == "unavailable"
+                    for memory in memories
+                ),
+            },
         },
     )
 
@@ -157,20 +177,70 @@ async def process_one() -> bool:
         if job is None:
             return False
         try:
+            business = get_business_config()
             if job.payload.get("job_type") == "embedding_backfill":
                 memory_id = UUID(str(job.payload["memory_id"]))
                 memory = await session.get(Memory, memory_id)
-                if memory and memory.embedding is None:
-                    business = get_business_config()
-                    embedding = await create_embedding_model(
-                        config=business
-                    ).aembed_query(memory.content)
-                    if len(embedding) != business.models.embedding_dimensions:
-                        raise ValueError("Embedding 维度与配置不一致")
-                    memory.embedding = embedding
-                    metadata = dict(memory.metadata_)
-                    metadata["embedding_status"] = "ready"
-                    memory.metadata_ = metadata
+                if memory:
+                    repository = ConversationRepository(session)
+                    if not embedding_job_matches(
+                        job.payload, memory, config=business.models
+                    ):
+                        if not embedding_is_current(
+                            memory,
+                            config=business.models,
+                            allow_legacy=False,
+                        ):
+                            await repository.queue_embedding_job(
+                                memory=memory,
+                                message_id=job.message_id,
+                                conversation_id=job.conversation_id,
+                                embedding_model=business.models.embedding_model,
+                                embedding_dimensions=(
+                                    business.models.embedding_dimensions
+                                ),
+                                run_id=job.payload.get("run_id"),
+                            )
+                    elif not embedding_is_current(
+                        memory, config=business.models, allow_legacy=False
+                    ):
+                        snapshot_content = memory.content
+                        attempt = await embed_text(
+                            create_embedding_model(config=business),
+                            snapshot_content,
+                            expected_dimensions=(
+                                business.models.embedding_dimensions
+                            ),
+                        )
+                        if not attempt.ready:
+                            raise RuntimeError(
+                                "Embedding 补偿失败："
+                                f"{attempt.reason or 'unknown'}"
+                            )
+                        await session.refresh(memory, with_for_update=True)
+                        if not embedding_job_matches(
+                            job.payload, memory, config=business.models
+                        ):
+                            await repository.queue_embedding_job(
+                                memory=memory,
+                                message_id=job.message_id,
+                                conversation_id=job.conversation_id,
+                                embedding_model=business.models.embedding_model,
+                                embedding_dimensions=(
+                                    business.models.embedding_dimensions
+                                ),
+                                run_id=job.payload.get("run_id"),
+                            )
+                        else:
+                            memory.embedding = attempt.vector
+                            memory.metadata_ = mark_embedding_ready(
+                                memory.metadata_,
+                                content=snapshot_content,
+                                model=business.models.embedding_model,
+                                dimensions=(
+                                    business.models.embedding_dimensions
+                                ),
+                            )
             else:
                 memories = await MemoryExtractor(session).extract_and_store(
                     user_id=job.user_id, message=job.message
@@ -182,6 +252,10 @@ async def process_one() -> bool:
                             memory=memory,
                             message_id=job.message_id,
                             conversation_id=job.conversation_id,
+                            embedding_model=business.models.embedding_model,
+                            embedding_dimensions=(
+                                business.models.embedding_dimensions
+                            ),
                             run_id=job.payload.get("run_id"),
                         )
                 await record_extraction_completed(repository, job, memories)
