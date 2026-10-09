@@ -94,6 +94,16 @@ class ConversationRepository:
         )
         return list(reversed(result.all()))
 
+    async def get_message(
+        self, message_id: UUID, conversation_id: UUID
+    ) -> Message | None:
+        return await self.session.scalar(
+            select(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
+
     async def list_recent_messages(
         self, conversation_id: UUID, limit: int
     ) -> list[Message]:

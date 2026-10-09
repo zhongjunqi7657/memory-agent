@@ -13,7 +13,7 @@ from app.persistence.db import SessionFactory, get_session
 
 
 class StubAgentService:
-    def __init__(self, _session) -> None:
+    def __init__(self, _session, **kwargs) -> None:
         pass
 
     async def chat(self, **kwargs) -> None:
@@ -61,7 +61,7 @@ async def test_agent_run_continues_after_stream_consumer_disconnects(monkeypatch
     cancelled = False
 
     class BlockingAgentService:
-        def __init__(self, _session) -> None:
+        def __init__(self, _session, **kwargs) -> None:
             pass
 
         async def chat(self, **kwargs) -> None:

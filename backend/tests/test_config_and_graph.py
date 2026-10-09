@@ -5,12 +5,15 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
-from langchain_core.tools import tool
 from langgraph.checkpoint.memory import InMemorySaver
 
 from app.agent.graph import build_graph, replace_checkpoint_messages
 from app.api.chat import format_sse
-from app.config.business import BusinessConfig
+from app.config.business import BusinessConfig, business_config_path
+from app.protocol.tools import ToolExecutionContext, ToolResult
+from app.tools.builtin.memory import MemoryTool
+from app.tools.executor import ToolExecutor
+from app.tools.registry import ToolRegistry
 
 
 class FixedChatModel(FakeChatModel):
@@ -53,11 +56,21 @@ class ToolLoopModel(FakeChatModel):
         return self._generate(messages, stop=stop, run_manager=run_manager, **kwargs)
 
 
-@tool
-def lookup(query: str) -> str:
+async def lookup(arguments) -> ToolResult:
     """Look up a deterministic test value."""
 
-    return f"找到：{query}"
+    return ToolResult.success(f"找到：{arguments['query']}")
+
+
+def tool_graph(model, **kwargs):
+    registry = ToolRegistry([MemoryTool(
+        "builtin.test.lookup", "lookup", "Look up a deterministic test value",
+        {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]},
+        frozenset(), 1, lookup,
+    )])
+    return build_graph(model, tools=registry.function_schemas(),
+                       tool_executor=ToolExecutor(registry),
+                       tool_context=ToolExecutionContext("run", "agent"), **kwargs)
 
 
 def test_business_config_loads_toml(tmp_path: Path) -> None:
@@ -71,6 +84,43 @@ def test_business_config_loads_toml(tmp_path: Path) -> None:
     assert config.models.embedding_dimensions == 1024
 
 
+def test_business_config_runtime_path_override(tmp_path, monkeypatch):
+    path = tmp_path / "deployment.toml"
+    path.write_text('[tools]\ndefault_timeout_seconds = 2.5\n', encoding="utf-8")
+    monkeypatch.setenv("MEMORY_AGENT_CONFIG", str(path))
+    assert business_config_path() == path
+    assert BusinessConfig.load().tools.default_timeout_seconds == 2.5
+
+
+def test_explicit_new_tools_config_takes_precedence_over_legacy():
+    with pytest.warns(DeprecationWarning):
+        business = BusinessConfig.model_validate({
+            "mcp": {"enabled": False, "allowed_tools": [], "tool_timeout_seconds": 3},
+            "tools": {"enabled": True, "allowed_builtin_tools": ["builtin.memory.search"],
+                      "default_timeout_seconds": 2},
+        })
+    assert business.tools.enabled
+    assert business.tools.default_timeout_seconds == 2
+    assert business.tools.allowed_builtin_tools == ["builtin.memory.search"]
+
+
+def test_business_config_loads_mcp_policy(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.toml"
+    config_path.write_text(
+        '[mcp]\nenabled = false\nallowed_tools = ["search_memory"]\n'
+        'tool_timeout_seconds = 3.5\n',
+        encoding="utf-8",
+    )
+
+    with pytest.warns(DeprecationWarning):
+        config = BusinessConfig.load(config_path)
+
+    assert config.mcp.enabled is False
+    assert config.tools.enabled is False
+    assert config.tools.allowed_builtin_tools == ["builtin.memory.search"]
+    assert config.tools.default_timeout_seconds == 3.5
+
+
 def test_graph_returns_model_message() -> None:
     graph = build_graph(FixedChatModel())
     result = graph.invoke({"messages": [HumanMessage(content="我想学 Python")]})
@@ -81,7 +131,7 @@ def test_graph_returns_model_message() -> None:
 async def test_graph_runs_tool_node_and_returns_to_model() -> None:
     ToolLoopModel.call_count = 0
     model = ToolLoopModel()
-    graph = build_graph(model, tools=[lookup], max_tool_rounds=2)
+    graph = tool_graph(model, max_tool_rounds=2)
 
     result = await graph.ainvoke(
         {
@@ -99,7 +149,7 @@ async def test_graph_runs_tool_node_and_returns_to_model() -> None:
 async def test_graph_stops_after_configured_tool_round_limit() -> None:
     ToolLoopModel.call_count = 0
     model = ToolLoopModel(always_call_tool=True)
-    graph = build_graph(model, tools=[lookup], max_tool_rounds=1)
+    graph = tool_graph(model, max_tool_rounds=1)
 
     result = await graph.ainvoke(
         {

@@ -63,5 +63,14 @@ async def public_config() -> dict[str, object]:
             "context_token_budget": business.agent.context_token_budget,
             "max_tool_rounds": business.agent.max_tool_rounds,
         },
+        "mcp": {
+            "enabled": business.mcp.enabled,
+            "server_count": len(business.mcp.servers),
+        },
+        "tools": {
+            "enabled": business.tools.enabled,
+            "allowed_builtin_tools": business.tools.allowed_builtin_tools,
+            "default_timeout_seconds": business.tools.default_timeout_seconds,
+        },
         "checkpoint": checkpoint_status(),
     }
