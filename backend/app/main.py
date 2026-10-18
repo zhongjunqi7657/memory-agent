@@ -6,11 +6,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.agent.checkpoint import checkpoint_lifespan
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
+from app.api.mcp import router as mcp_router
 from app.api.memories import router as memories_router
 from app.api.reviews import router as reviews_router
 from app.api.runs import router as runs_router
 from app.api.system import router as system_router
+from app.config.business import business_config_path, get_business_config
 from app.config.settings import get_settings
+from app.mcp.manager import MCPConnectionManager
 
 settings = get_settings()
 
@@ -18,7 +21,15 @@ settings = get_settings()
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     async with checkpoint_lifespan(settings):
-        yield
+        business = get_business_config()
+        manager = MCPConnectionManager(business.mcp, default_timeout_seconds=business.tools.default_timeout_seconds,
+                                       cwd=str(business_config_path().parent))
+        _app.state.mcp_manager = manager
+        try:
+            await manager.start()
+            yield
+        finally:
+            await manager.close()
 
 app = FastAPI(
     title="Memory Agent API",
@@ -39,6 +50,7 @@ app.add_middleware(
 app.include_router(chat_router)
 app.include_router(conversations_router)
 app.include_router(memories_router)
+app.include_router(mcp_router)
 app.include_router(reviews_router)
 app.include_router(runs_router)
 app.include_router(system_router)

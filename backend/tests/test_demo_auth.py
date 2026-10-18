@@ -20,7 +20,7 @@ def test_demo_password_protects_chat_routes(monkeypatch) -> None:
     monkeypatch.setattr(chat_api, "enforce_chat_limits", lambda *_args: 1)
 
     class StubAgentService:
-        def __init__(self, _session) -> None:
+        def __init__(self, _session, **kwargs) -> None:
             pass
 
         async def chat(self, **_kwargs):

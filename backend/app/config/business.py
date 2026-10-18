@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+import logging
+import os
 import sys
+import warnings
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.mcp.config import MCPConfig
 
 if sys.version_info >= (3, 11):
     import tomllib
@@ -53,6 +58,19 @@ class SecurityConfig(BaseModel):
     daily_token_budget: int = Field(default=20000, ge=100, le=10_000_000)
 
 
+class ToolConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    enabled: bool = True
+    allowed_builtin_tools: list[str] = Field(
+        default_factory=lambda: [
+            "builtin.memory.search",
+            "builtin.memory.timeline",
+            "builtin.memory.propose_update",
+        ]
+    )
+    default_timeout_seconds: float = Field(default=8.0, gt=0, le=120)
+
+
 class BusinessConfig(BaseModel):
     """Non-secret knobs that are safe to commit and review."""
 
@@ -62,18 +80,49 @@ class BusinessConfig(BaseModel):
     memory: MemoryConfig = MemoryConfig()
     agent: AgentConfig = AgentConfig()
     security: SecurityConfig = SecurityConfig()
+    tools: ToolConfig = ToolConfig()
+    mcp: MCPConfig = MCPConfig()
+
+    @model_validator(mode="before")
+    @classmethod
+    def migrate_legacy_tools(cls, value):
+        if not isinstance(value, dict):
+            return value
+        legacy = dict(value.get("mcp", {})) if isinstance(value.get("mcp", {}), dict) else {}
+        if "allowed_tools" not in legacy and "tool_timeout_seconds" not in legacy:
+            return value
+        warnings.warn("mcp.allowed_tools / tool_timeout_seconds 已弃用，请迁移到 [tools]",
+                      DeprecationWarning, stacklevel=2)
+        logging.getLogger(__name__).warning("旧 MCP 工具配置已弃用，请将 allowed_tools 和 tool_timeout_seconds 迁移到 [tools]")
+        names = {"search_memory": "builtin.memory.search", "get_user_timeline": "builtin.memory.timeline",
+                 "propose_memory_update": "builtin.memory.propose_update"}
+        tools = dict(value.get("tools", {}))
+        if "allowed_tools" in legacy:
+            tools.setdefault("allowed_builtin_tools", [names.get(name, name) for name in legacy.pop("allowed_tools")])
+        if "tool_timeout_seconds" in legacy:
+            tools.setdefault("default_timeout_seconds", legacy.pop("tool_timeout_seconds"))
+        tools.setdefault("enabled", legacy.get("enabled", True))
+        return {**value, "mcp": legacy, "tools": tools}
 
     @classmethod
     def load(cls, path: Path | None = None) -> BusinessConfig:
-        config_path = path or _default_config_path()
+        config_path = path or business_config_path()
         if not config_path.exists():
+            if path is not None or os.environ.get("MEMORY_AGENT_CONFIG"):
+                raise FileNotFoundError("指定业务配置文件不存在")
             return cls()
         with config_path.open("rb") as config_file:
             return cls.model_validate(tomllib.load(config_file))
 
 
-def _default_config_path() -> Path:
-    return Path(__file__).resolve().parents[3] / "config.toml"
+def business_config_path() -> Path:
+    override = os.environ.get("MEMORY_AGENT_CONFIG")
+    if override:
+        return Path(override).resolve()
+    source = Path(__file__).resolve()
+    repository = source.parents[3] / "config.toml"
+    installed = source.parents[2] / "config.toml"
+    return repository if repository.exists() or not installed.exists() else installed
 
 
 @lru_cache

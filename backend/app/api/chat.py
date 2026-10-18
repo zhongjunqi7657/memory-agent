@@ -6,7 +6,7 @@ from collections.abc import AsyncIterator
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.responses import StreamingResponse
@@ -50,12 +50,13 @@ def format_sse(event: dict[str, object]) -> str:
 async def chat(
     request: ChatRequest,
     session: Annotated[AsyncSession, Depends(get_session)],
+    http_request: Request = None,
 ) -> ChatResponse:
     enforce_chat_limits(
         request.user_key, request.content, get_business_config().security
     )
     try:
-        result = await AgentService(session).chat(
+        result = await AgentService(session, mcp_manager=getattr(http_request.app.state, "mcp_manager", None) if http_request else None).chat(
             user_key=request.user_key,
             content=request.content,
             conversation_id=request.conversation_id,
@@ -71,6 +72,7 @@ async def chat_stream(
     session_factory: Annotated[
         async_sessionmaker[AsyncSession], Depends(get_session_factory)
     ],
+    http_request: Request = None,
 ) -> StreamingResponse:
     enforce_chat_limits(
         request.user_key, request.content, get_business_config().security
@@ -84,7 +86,7 @@ async def chat_stream(
         async def run_agent() -> None:
             try:
                 async with session_factory() as session:
-                    await AgentService(session).chat(
+                    await AgentService(session, mcp_manager=getattr(http_request.app.state, "mcp_manager", None) if http_request else None).chat(
                         user_key=request.user_key,
                         content=request.content,
                         conversation_id=request.conversation_id,

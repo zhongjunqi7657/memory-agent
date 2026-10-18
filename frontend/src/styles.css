@@ -142,8 +142,8 @@ button { cursor: pointer; }
 .memory-editor input { accent-color: #49766a; }
 
 .review-output { margin-bottom: 26px; padding: 18px 0 20px; border-top: 1px solid #cedcd7; border-bottom: 1px solid #cedcd7; }
-.review-output h2, .settings-groups h2, .memory-change-section h3 { margin: 0 0 9px; color: #34443f; font-size: 13px; font-weight: 500; }
-.review-output div { white-space: pre-wrap; color: #39464a; font-size: 13px; line-height: 1.8; }
+.review-output > h2, .settings-groups h2, .memory-change-section h3 { margin: 0 0 9px; color: #34443f; font-size: 13px; font-weight: 500; }
+.review-output > .markdown-content { color: #39464a; line-height: 1.8; }
 .timeline-list { border-top: 1px solid #e0e4e6; }
 .timeline-row { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 28px; padding: 19px 4px; border-bottom: 1px solid #e0e4e6; }
 .timeline-row time { color: #79858a; font-size: 11px; }

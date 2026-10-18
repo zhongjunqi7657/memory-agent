@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 from langchain_core.language_models.fake_chat_models import FakeChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from sqlalchemy import delete, select, text
 from sqlalchemy.engine import make_url
@@ -24,11 +24,13 @@ from sqlalchemy.ext.asyncio import (
 
 import app.api.chat as chat_api
 from app.agent import service as agent_service
+from app.agent.checkpoint import checkpoint_lifespan, get_checkpointer
 from app.agent.service import AgentService
-from app.config.business import get_business_config
+from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import Settings
 from app.jobs import worker
 from app.main import app
+from app.mcp.manager import MCPConnectionManager
 from app.memory.embeddings import embedding_content_version
 from app.memory.extractor import ExtractedMemory, ExtractionResult, MemoryExtractor
 from app.memory.service import MemoryService
@@ -41,9 +43,13 @@ from app.persistence.models import (
     MemorySensitivity,
     MemoryStatus,
     MessageRole,
+    Run,
+    RunEvent,
+    RunStatus,
     User,
 )
 from app.persistence.repositories import ConversationRepository, MemoryRepository
+from tests.test_mcp_stdio_integration import fixture_config, process_alive
 
 
 class RecordingChatModel(FakeChatModel):
@@ -58,6 +64,37 @@ class RecordingChatModel(FakeChatModel):
                 )
             ]
         )
+
+
+class CombinedToolsModel(FakeChatModel):
+    calls: int = 0
+    bound_names: ClassVar[set[str]] = set()
+
+    def bind_tools(self, tools, **kwargs):
+        type(self).bound_names = {tool["function"]["name"] for tool in tools}
+        return self
+
+    def _generate(self, messages, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            response = AIMessage(content="", tool_calls=[
+                {"id": "builtin", "name": "builtin__memory__timeline", "args": {}},
+                {"id": "remote", "name": "mcp__fixture__remote_echo", "args": {"value": "ok"}},
+                {"id": "invalid", "name": "mcp__fixture__remote_echo", "args": {}},
+            ])
+        elif self.calls == 2:
+            results = [message for message in messages if isinstance(message, ToolMessage)]
+            assert [item.tool_call_id for item in results] == ["builtin", "remote", "invalid"]
+            assert [item.status for item in results] == ["success", "success", "error"]
+            response = AIMessage(content="", tool_calls=[
+                {"id": "recovered", "name": "mcp__fixture__remote_echo", "args": {"value": "retry-valid-input"}},
+            ])
+        else:
+            response = AIMessage(content="两类工具执行与失败恢复完成")
+        return ChatResult(generations=[ChatGeneration(message=response)])
+
+    async def _agenerate(self, messages, **kwargs):
+        return self._generate(messages, **kwargs)
 
 
 @pytest.fixture
@@ -79,6 +116,48 @@ async def postgres_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
 
     yield async_sessionmaker(engine, expire_on_commit=False)
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_combines_builtin_and_real_mcp_with_persisted_audit_and_checkpoint(
+    postgres_factory, tmp_path
+):
+    marker = tmp_path / "pid.txt"
+    config = fixture_config(marker)
+    manager = MCPConnectionManager(config)
+    settings = Settings(_env_file=None, dashscope_api_key="",
+                        database_url=os.environ["TEST_DATABASE_URL"])
+    external_key = f"combined-mcp-{uuid4()}"
+    model = CombinedToolsModel()
+    try:
+        await manager.start()
+        assert manager.status()[0]["status"] == "ready"
+        async with checkpoint_lifespan(settings), postgres_factory() as session:
+                response = await AgentService(session, chat_model=model, embedding_model=None,
+                    business=BusinessConfig(mcp=config), settings=settings, mcp_manager=manager).chat(
+                    user_key=external_key, content="查询记忆与外部工具")
+                run = await session.get(Run, response["run_id"])
+                assert run.status is RunStatus.COMPLETED
+                events = list(await session.scalars(select(RunEvent).where(
+                    RunEvent.run_id == run.id, RunEvent.event_type.like("tool.execution.%")
+                ).order_by(RunEvent.sequence)))
+                assert len(events) == 8
+                assert [event.payload["source"] for event in events[::2]] == ["builtin", "mcp", "mcp", "mcp"]
+                assert [event.event_type for event in events[1::2]] == [
+                    "tool.execution.completed", "tool.execution.completed",
+                    "tool.execution.failed", "tool.execution.completed",
+                ]
+                checkpoint = await get_checkpointer().aget_tuple({"configurable": {
+                    "thread_id": str(response["conversation_id"])}})
+                assert checkpoint is not None
+                assert checkpoint.checkpoint["channel_values"]["tool_rounds"] == 2
+                assert response["message"] == "两类工具执行与失败恢复完成"
+                assert {"builtin__memory__timeline", "mcp__fixture__remote_echo"} <= model.bound_names
+    finally:
+        await manager.close()
+        async with postgres_factory() as session, session.begin():
+            await session.execute(delete(User).where(User.external_key == external_key))
+    assert not process_alive(int(marker.read_text()))
 
 
 @pytest.mark.asyncio
@@ -458,8 +537,8 @@ async def test_sse_chat_recalls_memory_across_conversations(
         async with postgres_factory() as session:
             yield session
 
-    def create_agent(session: AsyncSession) -> AgentService:
-        return AgentService(session, settings=settings)
+    def create_agent(session: AsyncSession, **kwargs) -> AgentService:
+        return AgentService(session, settings=settings, **kwargs)
 
     def create_model(**_kwargs):
         nonlocal model_factory_calls

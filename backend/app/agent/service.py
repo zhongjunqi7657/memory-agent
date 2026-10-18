@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.checkpoint import get_checkpointer
 from app.agent.context import estimate_tokens, prepare_conversation_context
 from app.agent.graph import build_graph, replace_checkpoint_messages
-from app.agent.tools import create_memory_tools
+from app.audit.sink import CallbackAuditSink
 from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import Settings, get_settings
 from app.memory.commands import MemoryCommandType, parse_memory_command
@@ -20,7 +20,10 @@ from app.memory.service import MemoryService
 from app.models.qwen import create_chat_model, create_embedding_model
 from app.persistence.models import MemoryStatus, MessageRole, RunStatus
 from app.persistence.repositories import ConversationRepository, MemoryRepository
+from app.protocol.tools import ToolExecutionContext
 from app.security.redaction import redact_secrets
+from app.tools.executor import ToolExecutor
+from app.tools.request import build_request_registry, request_permissions
 
 
 class AgentInputError(ValueError):
@@ -40,11 +43,13 @@ class AgentService:
         embedding_model=_AUTO_EMBEDDING,
         settings: Settings | None = None,
         business: BusinessConfig | None = None,
+        mcp_manager=None,
     ):
         self.session = session
         self.settings = settings or get_settings()
         self.business = business or get_business_config()
         self.chat_model = chat_model
+        self.mcp_manager = mcp_manager
         self.embedding_model = None
         if embedding_model is _AUTO_EMBEDDING and self.settings.dashscope_api_key:
             self.embedding_model = create_embedding_model(
@@ -364,7 +369,7 @@ class AgentService:
             )
             if context.summarized:
                 await emit("session.summary_updated")
-            tools = create_memory_tools(
+            tool_registry = build_request_registry(
                 self.session,
                 user_id=user.id,
                 conversation_id=conversation.id,
@@ -372,14 +377,24 @@ class AgentService:
                 business=self.business,
                 embedding_model=self.embedding_model,
                 emit=emit,
+                manager=self.mcp_manager,
             )
+            execution_context = ToolExecutionContext(
+                run_id=str(run.id), agent_id="memory-agent",
+                user_id=str(user.id), conversation_id=str(conversation.id),
+                source_message_id=str(user_message.id), granted_permissions=request_permissions(self.mcp_manager),
+                audit_sink=CallbackAuditSink(emit),
+            )
+            executor = ToolExecutor(tool_registry)
             checkpointer = get_checkpointer()
             graph_messages = context.messages
             if checkpointer is not None:
                 graph_messages = replace_checkpoint_messages(graph_messages)
             result = await build_graph(
                 chat_model,
-                tools=tools,
+                tools=tool_registry.function_schemas(),
+                tool_executor=executor,
+                tool_context=execution_context,
                 max_tool_rounds=self.business.agent.max_tool_rounds,
                 checkpointer=checkpointer,
             ).ainvoke(

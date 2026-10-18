@@ -21,6 +21,7 @@ import type {
   TimelineItem,
 } from "./api";
 import { ConversationSidebar } from "./components/ConversationSidebar";
+import { MarkdownContent } from "./components/MarkdownContent";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { RunDetails } from "./components/RunDetails";
 import { MemoriesPage } from "./pages/MemoriesPage";
@@ -57,6 +58,11 @@ const liveEventLabels: Record<string, string> = {
   "session.summary_updated": "已更新会话摘要",
   "tool.started": "正在使用记忆工具",
   "tool.completed": "记忆工具已完成",
+  "tool.execution.started": "正在使用工具",
+  "tool.execution.completed": "工具已完成",
+  "tool.execution.failed": "工具执行失败",
+  "tool.execution.denied": "工具权限不足",
+  "tool.execution.cancelled": "工具调用已取消",
   "model.completed": "正在整理回答",
   "memory.extraction_queued": "已排队更新长期记忆",
   "memory.command_applied": "已处理记忆指令",
@@ -379,7 +385,7 @@ function App() {
                   {message.role === "assistant" && <div className="assistant-avatar"><Sparkles size={15} /></div>}
                   <div className="message-content-wrap">
                     <div className="message-author">{message.role === "assistant" ? "Memory Agent" : "你"}</div>
-                    <div className="message-text">{message.content}</div>
+                    {message.role === "assistant" ? <MarkdownContent content={message.content} /> : <div className="message-text">{message.content}</div>}
                     {message.role === "assistant" && message.runEvents && <RunDetails events={message.runEvents} />}
                     {message.redacted && <div className="redaction-note">已在本机脱敏敏感信息</div>}
                   </div>

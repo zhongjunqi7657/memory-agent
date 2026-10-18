@@ -34,3 +34,38 @@ max_input_chars = 4000
 secret_redaction_enabled = true
 rate_limit_per_minute = 20
 daily_token_budget = 20000
+
+[tools]
+enabled = true
+allowed_builtin_tools = ["builtin.memory.search", "builtin.memory.timeline", "builtin.memory.propose_update"]
+default_timeout_seconds = 8.0
+
+[mcp]
+enabled = true
+allowed_commands = ["python", "node", "npx", "uvx"]
+
+[[mcp.servers]]
+id = "filesystem"
+enabled = false
+transport = "stdio"
+command = "npx"
+args = ["-y", "@modelcontextprotocol/server-filesystem@2026.8.31", "./demo-workspace"]
+env_allowlist = []
+# Optional explicit remote-name allowlist; omitted means all discovered tools.
+# allowed_tools = ["read_file"]
+command_timeout_seconds = 30.0
+
+[mcp.servers.default_permissions]
+capabilities = ["filesystem.read"]
+
+[mcp.servers.tool_permissions.write_file]
+capabilities = ["filesystem.write"]
+
+[mcp.servers.tool_permissions.edit_file]
+capabilities = ["filesystem.write"]
+
+[mcp.servers.tool_permissions.create_directory]
+capabilities = ["filesystem.write"]
+
+[mcp.servers.tool_permissions.move_file]
+capabilities = ["filesystem.write"]
