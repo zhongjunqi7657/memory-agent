@@ -29,6 +29,8 @@
 ```text
 backend/app/api/          HTTP and SSE endpoints
 backend/app/agent/        LangGraph state and nodes
+backend/app/execution/    Run lifecycle, cancellation and runtime coordination
+backend/app/workspace/    User-owned project directory bindings
 backend/app/config/       Configuration loading
 backend/app/protocol/     Protocol-independent tool contracts
 backend/app/tools/        Unified tool registry, execution and built-ins
@@ -63,6 +65,8 @@ docs/                     Architecture and interview notes
 首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。统一 Tool 执行核心、官方 MCP stdio Client、legacy HTTP 兼容入口与最小 CLI 已完成。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取，以及绑定内容和模型版本的 Embedding 补偿任务。
 
 Graph 使用三个请求级内置记忆工具与 MCP 远程工具快照，通过同一 Function Calling 循环和 ToolExecutor 执行。统一管线校验 JSON Schema、显式能力权限、超时与取消，并写入 `tool.execution.*` 运行事件。系统使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用分批持久摘要与统一 Token 预算。Embedding 降级原因、补偿版本和上下文裁剪状态均写入可重放运行事件。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。详细验收见 [改造记录](docs/tool-mcp-implementation.md)；架构和使用说明见 [架构文档](docs/architecture.md) 与 [演示流程](docs/demo-script.md)。
+
+桌面化前阶段 1/2 已完成项目目录绑定、任务状态/取消、运行中事件回放、重启中断、目录互斥，以及本地文本文件工具、命令审批和 Windows 子进程树回收。接口与限制见[阶段 1 验收记录](docs/pre-desktop-stage1-run-control.md)和[阶段 2 验收记录](docs/pre-desktop-stage2-controlled-execution.md)。本地执行默认关闭，仅在可信本机设置 `[local].enabled = true` 并绑定项目目录后启用；命令与删除需要审批，MCP 连接配置不等于调用批准。默认使用原目录；Diff、撤销与真实 worktree 在阶段 3，正式任务和审批界面在阶段 4。API 同一数据库只允许一个运行实例，请使用单进程启动；这不是操作系统沙箱。
 
 ## 本地运行
 
@@ -115,6 +119,8 @@ uv run pytest tests/test_postgres_integration.py -q
 ```
 
 集成测试会拒绝连接名称不以 `_test` 结尾的数据库，避免清理测试数据时误碰开发库。
+
+Windows 完整回归可运行 `./scripts/verify-baseline.ps1`。先在当前 worktree 的 `backend` 执行 `uv sync --locked`，在 `frontend` 执行 `npm ci`，并启动 Docker 引擎。脚本使用单独的 Compose 文件和随机项目名，在 loopback 随机端口创建临时 PostgreSQL + pgvector，执行迁移、完整后端测试、离线评测及前端测试/构建；后端有跳过或评测偏离已提交基线时门禁失败。临时数据库在退出时回收，报告保存在忽略目录 `.runtime/baseline/`，不操作开发数据库，也不覆盖预测快照或评测基线。Docker 仅用于这一回归流程，不是产品原生运行的强制依赖。
 
 ### API 示例
 

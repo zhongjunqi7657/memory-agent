@@ -142,6 +142,10 @@ function completedResponse(event: RunEvent): ChatResponse | null {
     : null;
 }
 
+function failedRun(event: RunEvent): boolean {
+  return ["error", "run.failed", "run.cancelled", "run.interrupted"].includes(event.event_type);
+}
+
 export async function fetchRunEvents(
   runId: string,
   afterSequence: number,
@@ -172,7 +176,7 @@ async function recoverRun(
     for (const event of events) {
       sequence = Math.max(sequence, event.sequence ?? sequence);
       onEvent?.(event);
-      if (event.event_type === "run.failed") {
+      if (failedRun(event)) {
         throw new Error(String(event.payload.message ?? "请求处理失败"));
       }
       const completed = completedResponse(event);
@@ -225,7 +229,7 @@ export async function streamChat(
         runId = event.run_id ?? runId;
         lastSequence = Math.max(lastSequence, event.sequence ?? lastSequence);
         onEvent?.(event);
-        if (event.event_type === "error" || event.event_type === "run.failed") {
+        if (failedRun(event)) {
           terminalError = new Error(String(event.payload.message ?? "请求处理失败"));
           throw terminalError;
         }

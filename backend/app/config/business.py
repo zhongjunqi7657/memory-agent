@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.config.local import LocalExecutionConfig
 from app.mcp.config import MCPConfig
 
 if sys.version_info >= (3, 11):
@@ -82,6 +83,7 @@ class BusinessConfig(BaseModel):
     security: SecurityConfig = SecurityConfig()
     tools: ToolConfig = ToolConfig()
     mcp: MCPConfig = MCPConfig()
+    local: LocalExecutionConfig = LocalExecutionConfig()
 
     @model_validator(mode="before")
     @classmethod

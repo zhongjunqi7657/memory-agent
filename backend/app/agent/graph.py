@@ -13,6 +13,7 @@ from langchain_core.messages import (
     SystemMessage,
     ToolMessage,
 )
+from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
@@ -112,7 +113,13 @@ def build_graph(
             )
             return {"messages": [response]}
 
-        workflow.add_node("call_model", call_model)
+        async def call_model_async(state: AgentState) -> dict[str, list[BaseMessage]]:
+            response = await chat_model.ainvoke(
+                [_system_message(state, system_prompt), *state["messages"]]
+            )
+            return {"messages": [response]}
+
+        workflow.add_node("call_model", RunnableLambda(call_model, afunc=call_model_async))
         workflow.add_edge("retrieve_memory", "call_model")
         workflow.add_edge("call_model", END)
         return workflow.compile(checkpointer=checkpointer)

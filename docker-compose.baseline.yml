@@ -1,0 +1,17 @@
+services:
+  postgres:
+    # Pin the PostgreSQL 16 + pgvector image used for the regression baseline.
+    image: pgvector/pgvector@sha256:ccc6e83d6e35e931dc7c5def2022729d5a6c370318d099181995567ff1fb4d6b
+    environment:
+      POSTGRES_USER: memory_agent
+      POSTGRES_DB: memory_agent_baseline_test
+      POSTGRES_PASSWORD: ${BASELINE_POSTGRES_PASSWORD:?Run scripts/verify-baseline.ps1}
+    ports:
+      - "127.0.0.1::5432"
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "memory_agent", "-d", "memory_agent_baseline_test"]
+      interval: 1s
+      timeout: 5s
+      retries: 30

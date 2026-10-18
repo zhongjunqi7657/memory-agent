@@ -15,11 +15,9 @@ from langchain_core.language_models.fake_chat_models import FakeChatModel
 from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from sqlalchemy import delete, select, text
-from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
-    create_async_engine,
 )
 
 import app.api.chat as chat_api
@@ -34,6 +32,7 @@ from app.mcp.manager import MCPConnectionManager
 from app.memory.embeddings import embedding_content_version
 from app.memory.extractor import ExtractedMemory, ExtractionResult, MemoryExtractor
 from app.memory.service import MemoryService
+from app.permission.approvals import ApprovalBroker
 from app.persistence.db import get_session, get_session_factory
 from app.persistence.models import (
     ExtractionJob,
@@ -54,6 +53,9 @@ from tests.test_mcp_stdio_integration import fixture_config, process_alive
 
 class RecordingChatModel(FakeChatModel):
     prompts: ClassVar[list[str]] = []
+
+    async def _agenerate(self, messages, **kwargs):
+        return self._generate(messages, **kwargs)
 
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         self.prompts.append("\n".join(str(message.content) for message in messages))
@@ -85,7 +87,7 @@ class CombinedToolsModel(FakeChatModel):
         elif self.calls == 2:
             results = [message for message in messages if isinstance(message, ToolMessage)]
             assert [item.tool_call_id for item in results] == ["builtin", "remote", "invalid"]
-            assert [item.status for item in results] == ["success", "success", "error"]
+            assert [item.status for item in results] == ["success", "success", "error"], [item.content for item in results]
             response = AIMessage(content="", tool_calls=[
                 {"id": "recovered", "name": "mcp__fixture__remote_echo", "args": {"value": "retry-valid-input"}},
             ])
@@ -95,27 +97,6 @@ class CombinedToolsModel(FakeChatModel):
 
     async def _agenerate(self, messages, **kwargs):
         return self._generate(messages, **kwargs)
-
-
-@pytest.fixture
-async def postgres_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
-    database_url = os.getenv("TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("TEST_DATABASE_URL is not configured")
-    database_name = make_url(database_url).database or ""
-    if not database_name.endswith("_test"):
-        pytest.fail("TEST_DATABASE_URL must target a database ending in '_test'")
-
-    engine = create_async_engine(database_url, pool_pre_ping=True)
-    try:
-        async with engine.connect() as connection:
-            await connection.execute(text("SELECT 1"))
-    except OSError as error:
-        await engine.dispose()
-        pytest.skip(f"PostgreSQL is unavailable: {error}")
-
-    yield async_sessionmaker(engine, expire_on_commit=False)
-    await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -129,13 +110,22 @@ async def test_agent_combines_builtin_and_real_mcp_with_persisted_audit_and_chec
                         database_url=os.environ["TEST_DATABASE_URL"])
     external_key = f"combined-mcp-{uuid4()}"
     model = CombinedToolsModel()
+    broker = ApprovalBroker()
+
+    async def approve_remote(event):
+        if event["event_type"] == "approval.requested":
+            from app.persistence.approvals import Approval
+
+            async with postgres_factory() as decision_session:
+                approval = await decision_session.get(Approval, event["payload"]["approval_id"])
+                await broker.decide(decision_session, approval.id, approval.user_id, approval.fingerprint, "approve_once")
     try:
         await manager.start()
         assert manager.status()[0]["status"] == "ready"
         async with checkpoint_lifespan(settings), postgres_factory() as session:
                 response = await AgentService(session, chat_model=model, embedding_model=None,
-                    business=BusinessConfig(mcp=config), settings=settings, mcp_manager=manager).chat(
-                    user_key=external_key, content="查询记忆与外部工具")
+                    business=BusinessConfig(mcp=config), settings=settings, mcp_manager=manager, broker=broker).chat(
+                    user_key=external_key, content="查询记忆与外部工具", event_sink=approve_remote)
                 run = await session.get(Run, response["run_id"])
                 assert run.status is RunStatus.COMPLETED
                 events = list(await session.scalars(select(RunEvent).where(

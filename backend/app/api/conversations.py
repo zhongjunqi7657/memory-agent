@@ -24,6 +24,7 @@ class ConversationResponse(BaseModel):
 
     id: UUID
     title: str | None
+    project_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 

@@ -1,5 +1,7 @@
 
+import asyncio
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
 import pytest
 from fastapi import FastAPI
@@ -87,6 +89,12 @@ async def test_application_lifecycle_orders_checkpoint_and_mcp(monkeypatch):
     events = []
 
     @asynccontextmanager
+    async def lease():
+        events.append("runtime.lock")
+        yield
+        events.append("runtime.unlock")
+
+    @asynccontextmanager
     async def checkpoint(settings):
         events.append("checkpoint.start")
         yield
@@ -103,13 +111,33 @@ async def test_application_lifecycle_orders_checkpoint_and_mcp(monkeypatch):
             events.append("mcp.close")
 
     monkeypatch.setattr(main, "checkpoint_lifespan", checkpoint)
+    monkeypatch.setattr(main, "runtime_lease", lease)
     monkeypatch.setattr(main, "MCPConnectionManager", Manager)
     monkeypatch.setattr(main, "get_business_config", BusinessConfig)
+    async def recover():
+        events.append("runs.recover")
+
+    monkeypatch.setattr(main, "recover_runs", recover)
     app = FastAPI()
     async with main.lifespan(app):
         assert isinstance(app.state.mcp_manager, Manager)
+        ready = asyncio.Event()
+
+        async def pending_run():
+            run_id = uuid4()
+            app.state.run_controller.register(run_id, uuid4(), uuid4(), None)
+            ready.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                app.state.run_controller.release(run_id)
+                events.append("run.closed")
+
+        task = asyncio.create_task(pending_run())
+        await ready.wait()
         events.append("application.ready")
-    assert events == ["checkpoint.start", "mcp.start", "application.ready", "mcp.close", "checkpoint.close"]
+    assert task.cancelled()
+    assert events == ["runtime.lock", "checkpoint.start", "runs.recover", "mcp.start", "application.ready", "run.closed", "mcp.close", "checkpoint.close", "runtime.unlock"]
 
 
 @pytest.mark.asyncio

@@ -17,6 +17,9 @@ from app.tools.registry import ToolRegistry
 
 
 class FixedChatModel(FakeChatModel):
+    async def _agenerate(self, messages, **kwargs):
+        return self._generate(messages, **kwargs)
+
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         return ChatResult(
             generations=[
