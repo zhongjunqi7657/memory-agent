@@ -8,6 +8,7 @@ import {
   fetchPublicConfig,
   fetchTimeline,
   generateReview,
+  cancelRun,
   streamChat,
   undoMemory,
   updateMemory,
@@ -19,6 +20,7 @@ import type {
   PublicConfig,
   RunEvent,
   TimelineItem,
+  TaskExecutionConfig,
 } from "./api";
 import { ConversationSidebar } from "./components/ConversationSidebar";
 import { MemoryPanel } from "./components/MemoryPanel";
@@ -26,9 +28,10 @@ import { RunDetails } from "./components/RunDetails";
 import { MemoriesPage } from "./pages/MemoriesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TimelinePage } from "./pages/TimelinePage";
+import { TaskPage } from "./pages/TaskPage";
 import { followRunEvents, mergeRunEvents, needsExtractionFollow } from "./runEvents";
 
-type AppView = "chat" | "memories" | "timeline" | "settings";
+type AppView = "chat" | "task" | "memories" | "timeline" | "settings";
 
 type ChatMessage = {
   id: string;
@@ -73,6 +76,8 @@ function isAbortError(error: unknown): boolean {
 
 function App() {
   const [view, setView] = useState<AppView>("chat");
+  const [taskConfig, setTaskConfig] = useState<TaskExecutionConfig>({ projectId: null, executionMode: "original", worktreeId: null });
+  const [activeRunId, setActiveRunId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(welcomeMessages);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -94,6 +99,7 @@ function App() {
   const activeConversationRef = useRef<string | null>(null);
   const conversationRequestRef = useRef(0);
   const activeChatRef = useRef<AbortController | null>(null);
+  const activeRunIdRef = useRef<string | null>(null);
   const runFollowersRef = useRef(new Map<string, AbortController>());
 
   const loadMemories = useCallback(async () => {
@@ -114,7 +120,15 @@ function App() {
   }, []);
 
   const stopActiveChat = useCallback(() => {
-    activeChatRef.current?.abort();
+    const controller = activeChatRef.current;
+    const runId = activeRunIdRef.current;
+    if (runId) {
+      void cancelRun(runId).catch((cancelError) => {
+        if (!isAbortError(cancelError)) setError(cancelError instanceof Error ? cancelError.message : "任务停止失败");
+      }).finally(() => controller?.abort());
+    } else {
+      controller?.abort();
+    }
     activeChatRef.current = null;
     setIsSending(false);
     setLiveEvent(null);
@@ -251,6 +265,7 @@ function App() {
   }, [loadConfig, loadTimeline, view]);
 
   const currentTitle = useMemo(() => {
+    if (view === "task") return "编码任务";
     if (view === "memories") return "长期记忆";
     if (view === "timeline") return "时间线与回顾";
     if (view === "settings") return "设置";
@@ -275,15 +290,19 @@ function App() {
           || activeConversationRef.current !== targetConversationId
         ) return;
         if (event.run_id) {
+          activeRunIdRef.current = event.run_id;
+          setActiveRunId(event.run_id);
           runEvents = mergeRunEvents(event.run_id, runEvents, [event]);
         }
         setLiveEvent(liveEventLabels[event.event_type] ?? null);
-      }, controller.signal);
+      }, controller.signal, taskConfig);
       if (
         activeChatRef.current !== controller
         || activeConversationRef.current !== targetConversationId
       ) return;
       runEvents = mergeRunEvents(response.run_id, runEvents);
+      activeRunIdRef.current = response.run_id;
+      setActiveRunId(response.run_id);
       activeConversationRef.current = response.conversation_id;
       setConversationId(response.conversation_id);
       localStorage.setItem(selectedConversationKey, response.conversation_id);
@@ -349,6 +368,8 @@ function App() {
     stopActiveChat();
     stopRunFollowers();
     activeConversationRef.current = null;
+    activeRunIdRef.current = null;
+    setActiveRunId(null);
     setView("chat");
     setMessages(welcomeMessages);
     setConversationId(null);
@@ -402,6 +423,8 @@ function App() {
             </div>
           </section>
         )}
+
+        {view === "task" && <TaskPage config={taskConfig} onConfigChange={setTaskConfig} runId={activeRunId} sending={isSending} onStop={stopActiveChat} onError={setError} />}
 
         {view === "memories" && <MemoriesPage memories={memories} loading={pageLoading} onRefresh={() => void loadMemories()} onUpdate={handleMemoryUpdate} onUndo={handleMemoryUndo} />}
         {view === "timeline" && <TimelinePage items={timeline} loading={pageLoading} review={review} reviewLoading={reviewLoading} periodDays={reviewPeriod} onPeriodChange={setReviewPeriod} onRefresh={() => void loadTimeline()} onGenerateReview={() => void handleGenerateReview()} />}

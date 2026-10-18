@@ -13,7 +13,7 @@ from sqlalchemy import delete, select
 
 from app.agent.service import AgentService
 from app.audit.sink import CallbackAuditSink
-from app.config.business import BusinessConfig
+from app.config.business import AgentConfig, BusinessConfig
 from app.config.local import LocalExecutionConfig
 from app.config.settings import Settings
 from app.execution.controller import RunController
@@ -304,6 +304,81 @@ async def test_real_agent_registry_read_edit_approved_command_and_durable_output
         assert not any(item["undoable"] for item in changes["changes"])
         with pytest.raises(ValueError, match="外部执行"):
             await ChangeJournal(session, snapshot, scenario["config"]).undo(changes["fingerprint"])
+
+
+@pytest.mark.asyncio
+async def test_agent_repairs_failed_command_and_reaches_completed_state(scenario):
+    import json
+
+    class RepairModel(FakeChatModel):
+        count: int = 0
+
+        def bind_tools(self, tools, **kwargs):
+            assert {tool["function"]["name"] for tool in tools} >= {
+                "builtin__local__read", "builtin__local__write", "builtin__local__command",
+            }
+            return self
+
+        async def _agenerate(self, messages, **kwargs):
+            self.count += 1
+            tool_messages = [message for message in messages if isinstance(message, ToolMessage)]
+            if self.count == 1:
+                name, args = "builtin__local__read", {"path": "code.py"}
+            elif self.count == 2:
+                read_result = json.loads(tool_messages[-1].content)
+                name, args = "builtin__local__write", {
+                    "path": "code.py", "content": "raise SystemExit(3)\n",
+                    "expected_version": read_result["version"],
+                }
+            elif self.count == 3:
+                name, args = "builtin__local__command", {"executable": sys.executable, "args": ["code.py"]}
+            elif self.count == 4:
+                failed = json.loads(tool_messages[-1].content)
+                assert failed["content"]["exit_code"] == 3
+                write_result = json.loads(tool_messages[-2].content)
+                name, args = "builtin__local__write", {
+                    "path": "code.py", "content": "print('repaired')\n",
+                    "expected_version": write_result["version"],
+                }
+            elif self.count == 5:
+                name, args = "builtin__local__command", {"executable": sys.executable, "args": ["code.py"]}
+            else:
+                success = json.loads(tool_messages[-1].content)
+                assert success["exit_code"] == 0 and success["stdout"].strip() == "repaired"
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content="repaired and verified"))])
+            return ChatResult(generations=[ChatGeneration(message=AIMessage(content="", tool_calls=[
+                {"id": str(self.count), "name": name, "args": args},
+            ]))])
+
+    (scenario["root"] / "code.py").write_text("print('broken')\n")
+
+    async def run():
+        async with scenario["factory"]() as session:
+            return await AgentService(session, chat_model=RepairModel(), embedding_model=None,
+                                      business=BusinessConfig(agent=AgentConfig(max_tool_rounds=6),
+                                                             local=scenario["config"]),
+                                      settings=Settings(_env_file=None, dashscope_api_key=""),
+                                      controller=scenario["controller"], broker=scenario["broker"]).chat(
+                user_key=scenario["key"], content="repair and verify", project_id=scenario["project"].id,
+                event_sink=scenario["events"].put)
+
+    task = asyncio.create_task(run())
+    first = await pending(scenario)
+    assert first["tool_id"] == "builtin.local.command"
+    await decide(scenario, first)
+    second = await pending(scenario)
+    assert second["tool_id"] == "builtin.local.command"
+    await decide(scenario, second)
+    response = await asyncio.wait_for(task, 10)
+    assert response["message"] == "repaired and verified"
+    assert (scenario["root"] / "code.py").read_text() == "print('repaired')\n"
+
+    async with scenario["factory"]() as session:
+        events = list(await session.scalars(select(RunEvent).where(RunEvent.run_id == response["run_id"]).order_by(RunEvent.sequence)))
+        commands = [event.payload["command_result"] for event in events if "command_result" in event.payload]
+        assert [command["exit_code"] for command in commands] == [3, 0]
+        assert events[-1].event_type == "run.completed"
+        assert (await session.get(Run, response["run_id"])).status is RunStatus.COMPLETED
 
 
 @pytest.mark.asyncio

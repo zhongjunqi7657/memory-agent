@@ -1,4 +1,4 @@
-import { Brain, CalendarRange, MessageCircle, Plus, Settings, Sparkles, X } from "lucide-react";
+import { Brain, CalendarRange, Code2, MessageCircle, Plus, Settings, Sparkles, X } from "lucide-react";
 import type { ConversationSummary } from "../api";
 
 function formatConversationDate(value: string) {
@@ -17,8 +17,8 @@ type ConversationSidebarProps = {
   onClose: () => void;
   onNew: () => void;
   onSelect: (id: string) => void;
-  view: "chat" | "memories" | "timeline" | "settings";
-  onNavigate: (view: "chat" | "memories" | "timeline" | "settings") => void;
+  view: "chat" | "task" | "memories" | "timeline" | "settings";
+  onNavigate: (view: "chat" | "task" | "memories" | "timeline" | "settings") => void;
 };
 
 export function ConversationSidebar({
@@ -46,6 +46,7 @@ export function ConversationSidebar({
       </button>
       <nav className="workspace-nav" aria-label="工作区导航">
         <button className={view === "chat" ? "active" : ""} onClick={() => onNavigate("chat")}><MessageCircle size={16} />对话</button>
+        <button className={view === "task" ? "active" : ""} onClick={() => onNavigate("task")}><Code2 size={16} />编码任务</button>
         <button className={view === "memories" ? "active" : ""} onClick={() => onNavigate("memories")}><Brain size={16} />长期记忆</button>
         <button className={view === "timeline" ? "active" : ""} onClick={() => onNavigate("timeline")}><CalendarRange size={16} />时间线与回顾</button>
         <button className={view === "settings" ? "active" : ""} onClick={() => onNavigate("settings")}><Settings size={16} />设置</button>
