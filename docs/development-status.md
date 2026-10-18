@@ -2,9 +2,17 @@
 
 更新日期：2026-10-18
 
+## Delivery notes (2026-10-18)
+
+- Branch: `codex/tool-mcp-cli`.
+- Move project selection, approvals, command output, change review and optional worktree controls into the conversation workflow; restore pending runs from history.
+- Include selected project identity in model context and apply an independent project tool budget with a final summary when the budget is exhausted.
+- Render new and stored assistant replies and generated reviews as Markdown; keep user input literal and contain wide tables within their own scroll area.
+- Validation: the baseline gate passed with 246 backend tests, 27 frontend tests, Ruff, database migration rollback/reapply and the production build. The offline evaluation matched its recorded baseline, including the 4 existing quality failures.
+
 ## 当前开发进度与文档入口
 
-桌面化前阶段 0 至阶段 3 已完成并通过阶段门禁。阶段 4 的任务工作台、审批、Diff、撤销和 worktree 操作界面已实现，确定性编码修错闭环已加入回归；真实界面演示与独立演示仓库验收仍需在阶段 4 手工复验。
+桌面化前阶段 0 至阶段 3 已完成并通过阶段门禁。阶段 4 仍在开发验收中：按用户确认的 Codex 式交互，在对话框左下角选择/添加项目，选文件夹后自动添加并选中；审批、命令输出与折叠 Diff 均放在对应回复中，Worktree 收在高级选项。独立“编码任务”页已移除，完整真实模型与独立演示仓库验收仍待完成。
 
 | 阶段 | 状态 | 交付或下一步 |
 | --- | --- | --- |
@@ -12,16 +20,20 @@
 | 1. 项目身份与运行控制 | 已验收 | 项目目录绑定、任务状态、取消/中断、目录互斥；见[阶段 1](pre-desktop-stage1-run-control.md) |
 | 2. 审批与受控执行 | 已验收 | 文件工具、命令审批、Windows 子进程回收、MCP 调用授权；见[阶段 2](pre-desktop-stage2-controlled-execution.md) |
 | 3. Diff、撤销与可选 worktree | 已验收 | 任务基线、归属保护、显式创建、带回及清理；见[阶段 3](pre-desktop-stage3-workspace-changes.md) |
-| 4. Agent 编码闭环与任务界面 | 开发完成，手工验收待复验 | 读代码→修改→测试失败→修正→通过；任务工作台、审批、Diff、撤销和 worktree 操作已接入，待真实界面和命令演示 |
+| 4. Agent 编码闭环与对话界面 | 开发验收中 | 对话框项目菜单、行内审批、折叠 Diff、历史恢复已接入；真实模型项目识别/读取已验证，完整命令与重连演示待验收 |
 | 5. 分层长期记忆 | 待开始 | 个人/项目/临时上下文隔离，worktree 共享项目身份 |
 | 6. MCP 客户端扩展 | 待开始 | Streamable HTTP、resources、prompts、鉴权与连接管理 |
 | 7. 本地交付与整体审计 | 待开始 | 启动与生命周期、本机访问安全、完整演示与最终审计 |
 
 完整范围与各阶段进入条件见[桌面化前实施与验收方案](pre-desktop-implementation-plan.md)；此前 Tool/MCP/CLI 文件级改造见[历史改造验收记录](tool-mcp-implementation.md)。两套文档的阶段编号属于不同实施批次。
 
-最新门禁（2026-10-18）：后端 **227 passed、0 skipped、0 failed**，前端 **8 passed**；Ruff、TypeScript/生产构建、数据库迁移回退/重升、离线评测基线一致性均通过。阶段 3二次验收的独立基线为后端 226 项、前端 6 项；阶段 4新增审批恢复回归使当前总数增加。阶段 3证据目录为 `.runtime/baseline/db7ba532d3ae40ebadfc9920cb428c06/`，完整复现命令为 `./scripts/verify-baseline.ps1`。
+最新对话界面、项目识别与工具预算修复回归（2026-10-18）：后端 **246 passed、0 skipped、0 failed**，前端 **20 passed**；Ruff、TypeScript/生产构建及差异检查通过。覆盖自动添加项目、原生窗口取消不添加、选择期间阻止误发送、项目搜索/切换、历史项目及等待审批恢复、停止与提前停止、折叠 Diff 与撤销确认，以及项目上下文传入模型、工具关闭提示。Edge + Qwen 已在独立演示目录实际读取 README，事件确认无命令/写入/删除；API 已重启且数据库/Checkpoint 正常。原生窗口人工选择与完整命令失败修复/重连演示尚待验证。此前阶段 4 回归为后端 227 项、前端 8 项，迁移回退/重升和离线评测基线一致性通过；本次未修改迁移和记忆评测链路。阶段 3 二次验收的独立基线为后端 226 项、前端 6 项，证据目录为 `.runtime/baseline/db7ba532d3ae40ebadfc9920cb428c06/`，完整复现命令为 `./scripts/verify-baseline.ps1`。
 
-仍有 4 条既有记忆质量失败；当前不具备操作系统沙箱，也尚未完成阶段 7 的本机访问安全与整体发布审计。阶段 3提交 `6a48328` 与阶段 4提交 `6583720` 已推送到远端 `codex/tool-mcp-cli`；阶段 0/1/2 已通过 `4db3e1e` 交付远端。
+“选择项目后模型仍问是哪一个项目”已修复：原先绑定仅存在执行上下文，没有进入模型提示，开发配置又默认关闭本地工具。现请求级注入项目身份/执行目录与有效工具状态，前端在本地或全局工具关闭时明确提示。当前 worktree 使用自身不纳入 Git 的 `config.toml` 启用本地工具，默认示例与原目录配置不变。旧回复和缺失快照保留历史状态，重新发送即可使用修复后的能力；详情及真实读取证据见[阶段 4 记录](pre-desktop-stage4-agent-task-ui.md)。
+
+项目审计只读 4 轮就终止的问题已修复：普通聊天默认 4 轮，项目任务独立默认 24 轮；触顶后停止新工具并根据已有证据生成阶段性报告，明确未检查范围。新增超过 4 轮读取、低预算/零预算与待调用不执行回归。重启后 Edge + Qwen 在用户已绑定项目实际执行 7 轮只读调用并生成阶段性报告，Run 完成、Diff 为空，无命令或文件改动；本次未触及 24 轮上限，触顶总结已有确定性回归。证据见[阶段 4 记录](pre-desktop-stage4-agent-task-ui.md)。
+
+仍有 4 条既有记忆质量失败；当前不具备操作系统沙箱，也尚未完成阶段 7 的本机访问安全与整体发布审计。阶段 3 提交 `6a48328` 与阶段 4 提交 `6583720` 已推送到远端 `codex/tool-mcp-cli`；阶段 0/1/2 已通过 `4db3e1e` 交付远端。本次对话界面与 Markdown 改动的交付范围及验证结果见上方英文交付备注。
 
 阶段 4 的实现与自动化门禁见[阶段 4 验收记录](pre-desktop-stage4-agent-task-ui.md)。阶段 4当前仍保留手工浏览器演示、真实界面重连恢复和独立演示仓库命令验收项，不能据自动化测试通过宣称桌面化前全部发布验收完成。
 

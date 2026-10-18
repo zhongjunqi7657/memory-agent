@@ -35,6 +35,20 @@ class RunResponse(BaseModel):
     finished_at: datetime | None
 
 
+@router.get("/conversations/{conversation_id}/runs", response_model=list[RunResponse])
+async def conversation_runs(
+    conversation_id: UUID, session: Annotated[AsyncSession, Depends(get_session)],
+    user_key: Annotated[str, Query(min_length=1, max_length=128)] = "demo-user",
+):
+    conversation = await session.scalar(select(Conversation).join(User, User.id == Conversation.user_id)
+                                       .where(Conversation.id == conversation_id, User.external_key == user_key))
+    if conversation is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    runs = await session.scalars(select(Run).where(Run.conversation_id == conversation_id)
+                                .order_by(Run.created_at.desc()).limit(50))
+    return [RunResponse.model_validate(run) for run in runs]
+
+
 async def owned_run(session: AsyncSession, run_id: UUID, user_key: str) -> Run:
     run = await session.scalar(select(Run).join(Conversation, Conversation.id == Run.conversation_id)
                                .join(User, User.id == Conversation.user_id)

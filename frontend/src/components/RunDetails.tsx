@@ -47,6 +47,7 @@ const eventLabels: Record<string, string> = {
   "tool.execution.failed": "工具执行失败",
   "tool.execution.denied": "工具权限不足",
   "tool.execution.cancelled": "工具调用已取消",
+  "agent.tool_limit_reached": "工具预算用完，已生成阶段性结果",
   "model.completed": "回答已生成",
   "memory.extraction_queued": "记忆提取已入队",
   "memory.command_applied": "记忆指令已处理",
@@ -63,6 +64,7 @@ const embeddingFallbackLabels: Record<string, string> = {
 };
 
 function eventDescription(event: RunEvent) {
+  if (event.event_type === "agent.tool_limit_reached") return `${String(event.payload.tool_rounds)} / ${String(event.payload.limit)} 轮`;
   if (event.event_type === "memory.embedding_ready") {
     return `${String(event.payload.dimensions ?? 0)} 维`;
   }

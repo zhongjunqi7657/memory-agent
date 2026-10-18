@@ -62,13 +62,23 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)。截至 2026-10-18，阶段 0 至阶段 3 已通过门禁，阶段 4 尚未开始；最新完整回归为后端 226 项、前端 6 项通过，记忆离线评测仍保留 4 条既有质量失败。
+开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)。截至 2026-10-18，阶段 0 至阶段 3 已通过门禁，阶段 4 正在开发验收；最新完整回归为后端 246 项、前端 20 项通过，记忆离线评测仍保留 4 条既有质量失败。
 
 首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。统一 Tool 执行核心、官方 MCP stdio Client、legacy HTTP 兼容入口与最小 CLI 已完成。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取，以及绑定内容和模型版本的 Embedding 补偿任务。
 
 Graph 使用三个请求级内置记忆工具与 MCP 远程工具快照，通过同一 Function Calling 循环和 ToolExecutor 执行。统一管线校验 JSON Schema、显式能力权限、超时与取消，并写入 `tool.execution.*` 运行事件。系统使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用分批持久摘要与统一 Token 预算。Embedding 降级原因、补偿版本和上下文裁剪状态均写入可重放运行事件。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。详细验收见 [改造记录](docs/tool-mcp-implementation.md)；架构和使用说明见 [架构文档](docs/architecture.md) 与 [演示流程](docs/demo-script.md)。
 
-桌面化前阶段 1/2/3 已完成项目目录绑定、任务状态/取消、运行中事件回放、重启中断、目录互斥、本地文本文件工具、命令审批、Windows 子进程树回收，以及任务基线 Diff、安全撤销和显式 Git worktree 的创建、带回与清理。接口与限制见[阶段 1 验收记录](docs/pre-desktop-stage1-run-control.md)、[阶段 2 验收记录](docs/pre-desktop-stage2-controlled-execution.md)和[阶段 3 验收记录](docs/pre-desktop-stage3-workspace-changes.md)。本地执行默认关闭，仅在可信本机设置 `[local].enabled = true` 并绑定项目目录后启用；命令与删除需要审批，MCP 连接配置不等于调用批准。默认使用原目录，用户显式选择时才创建 worktree；命令或 MCP 执行后不承诺自动撤销。正式任务、Diff、审批和 worktree 操作界面在阶段 4。API 同一数据库只允许一个运行实例，请使用单进程启动；这不是操作系统沙箱。
+桌面化前阶段 1/2/3 已完成项目目录绑定、任务状态/取消、运行中事件回放、重启中断、目录互斥、本地文本文件工具、命令审批、Windows 子进程树回收，以及任务基线 Diff、安全撤销和显式 Git worktree 的创建、带回与清理。接口与限制见[阶段 1 验收记录](docs/pre-desktop-stage1-run-control.md)、[阶段 2 验收记录](docs/pre-desktop-stage2-controlled-execution.md)和[阶段 3 验收记录](docs/pre-desktop-stage3-workspace-changes.md)。本地执行默认关闭，仅在可信本机设置 `[local].enabled = true` 并选择项目目录后启用；命令与删除需要审批，MCP 连接配置不等于调用批准。默认使用原目录，用户显式选择时才创建 worktree；命令或 MCP 执行后不承诺自动撤销。阶段 4 已将项目选择、审批与 Diff 整合进对话，操作方式见下文及[阶段 4 记录](docs/pre-desktop-stage4-agent-task-ui.md)。API 同一数据库只允许一个运行实例，请使用单进程启动；这不是操作系统沙箱。
+
+### 在对话中使用项目
+
+新建对话后，点击输入框左下角“选择项目”→“添加本地项目…”，选择文件夹即可自动添加并选中，也可搜索已有项目。普通聊天无需项目。发送后项目与执行目录固定，切换项目会开启新对话；历史会话会恢复原项目及等待中的审批。
+
+项目身份与执行目录会传入模型上下文，审计时根据工具实际读取的文件回答。若提示“本地文件访问未启用”，请在实际加载的本机 `config.toml` 中设置 `[local].enabled = true`，并确保 `[tools].enabled = true`，重启 API 后重新发送任务；仅选择文件夹不会覆盖部署配置。设置页可查看项目文件访问状态。此前未启用工具时的旧回复及缺失文件快照保持历史状态，不会自动重跑。
+
+普通聊天默认最多执行 4 轮工具，项目任务单独使用 `[agent].project_max_tool_rounds = 24`。设置页可查看两个上限；达到上限时停止执行新工具，根据已有文件证据生成阶段性结果并标出未检查范围，可发送“继续”处理剩余部分。上限不会绕过命令或删除审批。
+
+审批直接出现在对应回复中，确认目录和命令后选择“批准本次”或“拒绝”。命令输出和“修改了 N 个文件”默认折叠，展开可查看退出码、Diff 与可用的撤销操作。Worktree 放在项目菜单“高级选项”；停止按钮请求后端取消并等待结束。Windows 本机支持原生文件夹窗口，其他环境可展开手工路径备用入口；远端页面不能打开服务器本机窗口。真实模型的项目识别/读取已验证，完整命令失败修复与重连演示仍待阶段 4 验收。
 
 ## 本地运行
 

@@ -7,17 +7,16 @@ from typing import Annotated, TypedDict
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import (
-    AIMessage,
     BaseMessage,
     RemoveMessage,
     SystemMessage,
-    ToolMessage,
 )
 from langchain_core.runnables import RunnableLambda
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 
+from app.agent.tool_limits import summarize_tool_limit
 from app.agent.tool_node import UnifiedToolNode
 from app.memory.commands import parse_memory_command
 from app.protocol.tools import ToolExecutionContext
@@ -32,10 +31,11 @@ class AgentState(TypedDict, total=False):
     retrieved_memories: list[dict[str, object]]
     memory_command: str | None
     tool_rounds: int
+    tool_limit_reached: bool
 
 
 SYSTEM_PROMPT = (
-    "你是一个中文优先的个人成长与学习伙伴。"
+    "你是一个中文优先的个人助理，帮助用户学习成长和处理项目任务。"
     "只根据用户提供的事实回答，不把不确定推测说成事实。"
     "自动提供的长期记忆不足时，可以使用记忆检索或时间线工具。"
     "任何记忆变更都只能提出待确认建议，不能声称已经直接生效。"
@@ -157,18 +157,9 @@ def build_graph(
             return "limit"
         return "tools"
 
-    def tool_limit(state: AgentState) -> dict[str, list[BaseMessage]]:
-        return {
-            "messages": [
-                *[ToolMessage(
-                    content="工具调用已达到本轮上限", tool_call_id=call["id"],
-                    name=call["name"], status="error",
-                ) for call in state["messages"][-1].tool_calls],
-                AIMessage(
-                    content="工具调用已达到本轮上限。请缩小问题范围后再试。"
-                )
-            ]
-        }
+    async def tool_limit(state: AgentState) -> dict[str, object]:
+        return await summarize_tool_limit(chat_model, _system_message(state, system_prompt),
+                                          state["messages"], state.get("tool_rounds", 0))
 
     workflow.add_node("call_model", call_model_with_tools)
     workflow.add_node("tools", execute_tools)

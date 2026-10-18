@@ -23,6 +23,7 @@ pending_confidence_threshold = 0.5
 [agent]
 recent_turns = 8
 max_tool_rounds = 4
+project_max_tool_rounds = 24
 context_token_budget = 6000
 context_system_reserve_tokens = 200
 summary_trigger_tokens = 4800

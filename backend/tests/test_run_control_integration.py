@@ -80,6 +80,30 @@ async def remove_users(factory, *keys):
 
 
 @pytest.mark.asyncio
+async def test_conversation_run_recovery_is_owned_and_includes_unfinished_runs(postgres_factory):
+    factory, controller = postgres_factory, RunController()
+    key = f"recover-{uuid4()}"
+    try:
+        async with factory() as session:
+            repository = ConversationRepository(session)
+            user = await repository.get_or_create_user(key)
+            conversation = await repository.create_conversation(user.id, title="recovery")
+            run = await repository.create_run(conversation.id)
+            run.status = RunStatus.WAITING_APPROVAL
+            await session.commit()
+            conversation_id, run_id = conversation.id, run.id
+        async with api(factory, controller) as client:
+            response = await client.get(f"/v1/conversations/{conversation_id}/runs", params={"user_key": key})
+            assert response.status_code == 200
+            assert response.json()[0]["run_id"] == str(run_id)
+            assert response.json()[0]["status"] == "waiting_approval"
+            assert "worktree_id" in response.json()[0]
+            assert (await client.get(f"/v1/conversations/{conversation_id}/runs", params={"user_key": "outsider"})).status_code == 404
+    finally:
+        await remove_users(factory, key)
+
+
+@pytest.mark.asyncio
 async def test_live_binding_conflicts_owner_cancel_and_atomic_terminal(postgres_factory, tmp_path):
     factory, controller = postgres_factory, RunController()
     owner, outsider = f"run-owner-{uuid4()}", f"outsider-{uuid4()}"

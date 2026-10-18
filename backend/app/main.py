@@ -7,6 +7,7 @@ from app.agent.checkpoint import checkpoint_lifespan
 from app.api.approvals import router as approvals_router
 from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
+from app.api.local_dialogs import router as local_dialogs_router
 from app.api.mcp import router as mcp_router
 from app.api.memories import router as memories_router
 from app.api.projects import router as projects_router
@@ -67,5 +68,6 @@ app.include_router(mcp_router)
 app.include_router(reviews_router)
 app.include_router(runs_router)
 app.include_router(projects_router)
+app.include_router(local_dialogs_router)
 app.include_router(system_router)
 app.include_router(workspaces_router)

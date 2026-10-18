@@ -35,8 +35,10 @@ export type Approval = {
 
 export type TaskChange = {
   path: string;
-  status: string;
+  before_version?: string | null;
+  after_version?: string | null;
   diff: string;
+  truncated?: boolean;
   undoable: boolean;
   attribution: string;
 };
@@ -46,6 +48,18 @@ export type TaskChanges = {
   changes: TaskChange[];
   external_effects: boolean;
   conflicts: string[];
+  excluded?: string[];
+  truncated?: boolean;
+};
+
+export type TaskRun = {
+  run_id: string;
+  conversation_id: string;
+  status: string;
+  project_id: string | null;
+  execution_mode: "original" | "worktree";
+  execution_directory: string | null;
+  worktree_id: string | null;
 };
 
 export type WorktreePreview = {
@@ -61,6 +75,14 @@ async function json<T>(path: string, init?: RequestInit): Promise<T> {
 
 export function fetchProjects() {
   return json<Project[]>(`/v1/projects?user_key=${userKey}&limit=100`);
+}
+
+export function chooseProjectDirectory() {
+  return json<{ directory: string | null }>("/v1/local/directory-picker", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
 }
 
 export function createProject(name: string, directory: string) {
@@ -98,21 +120,27 @@ export function decideApproval(id: string, fingerprint: string, decision: "appro
 }
 
 export function fetchRun(runId: string) {
-  return json<{ run_id: string; status: string; project_id: string | null; execution_mode: string; execution_directory: string | null; worktree_id: string | null }>(
+  return json<TaskRun>(
     `/v1/runs/${encodeURIComponent(runId)}?user_key=${userKey}`,
   );
 }
 
-export function fetchTaskChanges(runId: string) {
-  return json<TaskChanges>(`/v1/runs/${encodeURIComponent(runId)}/changes?user_key=${userKey}`);
+export function fetchConversationRuns(conversationId: string) {
+  return json<TaskRun[]>(`/v1/conversations/${encodeURIComponent(conversationId)}/runs?user_key=${userKey}`);
 }
 
-export function undoTask(runId: string, fingerprint: string) {
-  return json<TaskChanges>(`/v1/runs/${encodeURIComponent(runId)}/undo?user_key=${userKey}`, {
+export async function fetchTaskChanges(runId: string) {
+  const changes = await json<TaskChanges>(`/v1/runs/${encodeURIComponent(runId)}/changes?user_key=${userKey}`);
+  return { ...changes, conflicts: changes.conflicts ?? [] };
+}
+
+export async function undoTask(runId: string, fingerprint: string) {
+  const changes = await json<TaskChanges>(`/v1/runs/${encodeURIComponent(runId)}/undo?user_key=${userKey}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ fingerprint, confirm: true }),
   });
+  return { ...changes, conflicts: changes.conflicts ?? [] };
 }
 
 export function previewWorktree(worktreeId: string, operation: "delivery" | "cleanup") {

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { KeyboardEvent } from "react";
-import { Menu, PanelRight, Send, Sparkles } from "lucide-react";
+import { Menu, PanelRight, Send, Sparkles, Square } from "lucide-react";
 import {
   fetchConversationMessages,
   fetchConversations,
@@ -23,15 +23,18 @@ import type {
   TaskExecutionConfig,
 } from "./api";
 import { ConversationSidebar } from "./components/ConversationSidebar";
+import { MarkdownContent } from "./components/MarkdownContent";
 import { MemoryPanel } from "./components/MemoryPanel";
 import { RunDetails } from "./components/RunDetails";
+import { ChatRun } from "./components/ChatRun";
+import { ProjectMenu } from "./components/ProjectMenu";
 import { MemoriesPage } from "./pages/MemoriesPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { TimelinePage } from "./pages/TimelinePage";
-import { TaskPage } from "./pages/TaskPage";
+import { fetchConversationRuns } from "./taskApi";
 import { followRunEvents, mergeRunEvents, needsExtractionFollow } from "./runEvents";
 
-type AppView = "chat" | "task" | "memories" | "timeline" | "settings";
+type AppView = "chat" | "memories" | "timeline" | "settings";
 
 type ChatMessage = {
   id: string;
@@ -43,6 +46,7 @@ type ChatMessage = {
 };
 
 const selectedConversationKey = "memory-agent:selected-conversation";
+const defaultTaskConfig: TaskExecutionConfig = { projectId: null, executionMode: "original", worktreeId: null };
 const welcomeMessages: ChatMessage[] = [
   {
     id: "welcome",
@@ -76,8 +80,10 @@ function isAbortError(error: unknown): boolean {
 
 function App() {
   const [view, setView] = useState<AppView>("chat");
-  const [taskConfig, setTaskConfig] = useState<TaskExecutionConfig>({ projectId: null, executionMode: "original", worktreeId: null });
+  const [taskConfig, setTaskConfig] = useState<TaskExecutionConfig>(defaultTaskConfig);
   const [activeRunId, setActiveRunId] = useState<string | null>(null);
+  const [liveRunEvents, setLiveRunEvents] = useState<RunEvent[]>([]);
+  const [recoveredRunId, setRecoveredRunId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>(welcomeMessages);
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
@@ -89,6 +95,7 @@ function App() {
   const [reviewPeriod, setReviewPeriod] = useState(7);
   const [reviewLoading, setReviewLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
+  const [isSelectingProject, setIsSelectingProject] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [pageLoading, setPageLoading] = useState(false);
   const [liveEvent, setLiveEvent] = useState<string | null>(null);
@@ -100,6 +107,7 @@ function App() {
   const conversationRequestRef = useRef(0);
   const activeChatRef = useRef<AbortController | null>(null);
   const activeRunIdRef = useRef<string | null>(null);
+  const pendingStopRef = useRef(false);
   const runFollowersRef = useRef(new Map<string, AbortController>());
 
   const loadMemories = useCallback(async () => {
@@ -122,17 +130,14 @@ function App() {
   const stopActiveChat = useCallback(() => {
     const controller = activeChatRef.current;
     const runId = activeRunIdRef.current;
-    if (runId) {
+    if (runId && (controller || recoveredRunId)) {
       void cancelRun(runId).catch((cancelError) => {
         if (!isAbortError(cancelError)) setError(cancelError instanceof Error ? cancelError.message : "任务停止失败");
-      }).finally(() => controller?.abort());
+      });
     } else {
-      controller?.abort();
+      if (controller) pendingStopRef.current = true;
     }
-    activeChatRef.current = null;
-    setIsSending(false);
-    setLiveEvent(null);
-  }, []);
+  }, [recoveredRunId]);
 
   const startRunFollower = useCallback((
     runId: string,
@@ -196,7 +201,12 @@ function App() {
   const selectConversation = useCallback(async (id: string) => {
     const requestId = conversationRequestRef.current + 1;
     conversationRequestRef.current = requestId;
-    stopActiveChat();
+    activeChatRef.current?.abort();
+    activeChatRef.current = null;
+    activeRunIdRef.current = null;
+    setActiveRunId(null);
+    setRecoveredRunId(null);
+    setIsSending(false);
     stopRunFollowers();
     activeConversationRef.current = id;
     setError(null);
@@ -206,8 +216,11 @@ function App() {
     setMobileNavOpen(false);
     localStorage.setItem(selectedConversationKey, id);
     try {
-      const stored = await fetchConversationMessages(id);
+      const [stored, runs, summaries] = await Promise.all([fetchConversationMessages(id), fetchConversationRuns(id), fetchConversations()]);
       if (conversationRequestRef.current !== requestId) return;
+      setConversations(summaries);
+      const latest = runs[0];
+      setTaskConfig({ projectId: summaries.find((item) => item.id === id)?.project_id ?? latest?.project_id ?? null, executionMode: latest?.execution_mode ?? "original", worktreeId: latest?.worktree_id ?? null });
       const loadedMessages = stored
         .filter((message) => message.role === "user" || message.role === "assistant")
         .map((message) => ({
@@ -218,7 +231,15 @@ function App() {
           runId: message.run_id ?? undefined,
           runEvents: message.run_id ? mergeRunEvents(message.run_id, message.run_events) : undefined,
         }));
-      setMessages(loadedMessages);
+      const orphanRuns: ChatMessage[] = runs.filter((run) => !loadedMessages.some((message) => message.runId === run.run_id)).reverse().map((run) => ({ id: run.run_id, role: "assistant", content: "", runId: run.run_id }));
+      setMessages([...loadedMessages, ...orphanRuns]);
+      const pending = runs.find((run) => ["queued", "running", "waiting_approval"].includes(run.status));
+      if (pending) {
+        activeRunIdRef.current = pending.run_id;
+        setActiveRunId(pending.run_id);
+        setRecoveredRunId(pending.run_id);
+        setIsSending(true);
+      }
       for (const message of loadedMessages) {
         if (message.runId && message.runEvents) {
           startRunFollower(message.runId, message.runEvents, id);
@@ -231,7 +252,11 @@ function App() {
     } finally {
       if (conversationRequestRef.current === requestId) setIsLoadingHistory(false);
     }
-  }, [startRunFollower, stopActiveChat, stopRunFollowers]);
+  }, [startRunFollower, stopRunFollowers]);
+
+  const restoreCompletedRun = useCallback(() => {
+    if (!activeChatRef.current && activeConversationRef.current) void selectConversation(activeConversationRef.current);
+  }, [selectConversation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -265,7 +290,6 @@ function App() {
   }, [loadConfig, loadTimeline, view]);
 
   const currentTitle = useMemo(() => {
-    if (view === "task") return "编码任务";
     if (view === "memories") return "长期记忆";
     if (view === "timeline") return "时间线与回顾";
     if (view === "settings") return "设置";
@@ -274,12 +298,16 @@ function App() {
 
   async function handleSend() {
     const content = input.trim();
-    if (!content || isSending) return;
+    if (!content || isSending || isLoadingHistory || isSelectingProject) return;
     setError(null);
     setInput("");
     setMessages((current) => [...current, { id: crypto.randomUUID(), role: "user", content }]);
     setIsSending(true);
-    const targetConversationId = activeConversationRef.current;
+    pendingStopRef.current = false;
+    activeRunIdRef.current = null;
+    setActiveRunId(null);
+    setLiveRunEvents([]);
+    let targetConversationId = activeConversationRef.current;
     const controller = new AbortController();
     activeChatRef.current = controller;
     let runEvents: RunEvent[] = [];
@@ -292,7 +320,18 @@ function App() {
         if (event.run_id) {
           activeRunIdRef.current = event.run_id;
           setActiveRunId(event.run_id);
+          if (pendingStopRef.current) {
+            pendingStopRef.current = false;
+            void cancelRun(event.run_id).catch((cancelError) => setError(cancelError instanceof Error ? cancelError.message : "任务停止失败"));
+          }
           runEvents = mergeRunEvents(event.run_id, runEvents, [event]);
+          setLiveRunEvents(runEvents);
+        }
+        if (event.event_type === "run.started" && typeof event.payload.conversation_id === "string") {
+          targetConversationId = event.payload.conversation_id;
+          activeConversationRef.current = targetConversationId;
+          setConversationId(targetConversationId);
+          localStorage.setItem(selectedConversationKey, targetConversationId);
         }
         setLiveEvent(liveEventLabels[event.event_type] ?? null);
       }, controller.signal, taskConfig);
@@ -317,6 +356,10 @@ function App() {
       startRunFollower(response.run_id, runEvents, response.conversation_id);
       await Promise.all([loadMemories(), loadConversations()]);
     } catch (sendError) {
+      if (activeChatRef.current === controller && activeRunIdRef.current) {
+        const failedId = activeRunIdRef.current;
+        setMessages((current) => [...current, { id: failedId, role: "assistant", content: "", runId: failedId, runEvents }]);
+      }
       if (!isAbortError(sendError)) {
         setError(sendError instanceof Error ? sendError.message : "请求失败，请重试");
       }
@@ -370,6 +413,10 @@ function App() {
     activeConversationRef.current = null;
     activeRunIdRef.current = null;
     setActiveRunId(null);
+    setRecoveredRunId(null);
+    setLiveRunEvents([]);
+    setTaskConfig(defaultTaskConfig);
+    setInput("");
     setView("chat");
     setMessages(welcomeMessages);
     setConversationId(null);
@@ -384,9 +431,15 @@ function App() {
     setMobileNavOpen(false);
   }
 
+  function changeProject(config: TaskExecutionConfig) {
+    if (isSending) return;
+    if (conversationId) resetConversation();
+    setTaskConfig(config);
+  }
+
   return (
     <div className={`app-shell ${view === "chat" && memoryPanelOpen ? "memory-open" : ""}`}>
-      <ConversationSidebar conversations={conversations} currentId={conversationId} open={mobileNavOpen} view={view} onClose={() => setMobileNavOpen(false)} onNew={resetConversation} onSelect={(id) => void selectConversation(id)} onNavigate={navigate} />
+      <ConversationSidebar conversations={conversations} currentId={conversationId} open={mobileNavOpen} view={view} busy={isSending || isSelectingProject} onClose={() => setMobileNavOpen(false)} onNew={resetConversation} onSelect={(id) => void selectConversation(id)} onNavigate={navigate} />
       {mobileNavOpen && <button className="scrim" aria-label="关闭导航" onClick={() => setMobileNavOpen(false)} />}
 
       <main className="main-column">
@@ -405,26 +458,28 @@ function App() {
                   {message.role === "assistant" && <div className="assistant-avatar"><Sparkles size={15} /></div>}
                   <div className="message-content-wrap">
                     <div className="message-author">{message.role === "assistant" ? "Memory Agent" : "你"}</div>
-                    <div className="message-text">{message.content}</div>
+                    {message.role === "assistant" ? <MarkdownContent content={message.content} /> : <div className="message-text">{message.content}</div>}
                     {message.role === "assistant" && message.runEvents && <RunDetails events={message.runEvents} />}
+                    {message.role === "assistant" && message.runId && <ChatRun runId={message.runId} events={message.runEvents} onRecovered={message.runId === recoveredRunId ? restoreCompletedRun : undefined} />}
                     {message.redacted && <div className="redaction-note">已在本机脱敏敏感信息</div>}
                   </div>
                 </article>
               ))}
-              {isSending && <article className="message-row assistant"><div className="assistant-avatar"><Sparkles size={15} /></div><div className="message-content-wrap"><div className="message-author">Memory Agent</div><div className="typing-indicator"><span /><span /><span /><em>{liveEvent ?? "正在思考"}</em></div></div></article>}
+              {isSending && !recoveredRunId && <article className="message-row assistant"><div className="assistant-avatar"><Sparkles size={15} /></div><div className="message-content-wrap"><div className="message-author">Memory Agent</div><p className="live-message">{liveEvent ?? "正在思考"}</p>{activeRunId && <ChatRun runId={activeRunId} events={liveRunEvents} live onStop={stopActiveChat} />}</div></article>}
             </div>
             <div className="composer-wrap">
               {error && <div className="error-banner">{error}</div>}
               <div className="composer">
+                <div className="composer-input-row">
                 <textarea ref={textareaRef} value={input} onChange={(event) => setInput(event.target.value)} onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void handleSend(); } }} placeholder="告诉我你最近在思考什么..." rows={1} aria-label="输入消息" />
-                <button className="send-button" aria-label="发送消息" disabled={!input.trim() || isSending} onClick={() => void handleSend()}><Send size={17} /></button>
+                {isSending ? <button className="send-button stop-button" aria-label="停止任务" onClick={stopActiveChat}><Square size={15} /></button> : <button className="send-button" aria-label="发送消息" disabled={!input.trim() || isLoadingHistory || isSelectingProject} onClick={() => void handleSend()}><Send size={17} /></button>}
+                </div>
+                <div className="composer-toolbar"><ProjectMenu config={taskConfig} locked={conversationId !== null} disabled={isSending || isLoadingHistory} onChange={changeProject} onError={setError} onBusyChange={setIsSelectingProject} /></div>
               </div>
               <div className="composer-hint">Enter 发送 · Shift + Enter 换行</div>
             </div>
           </section>
         )}
-
-        {view === "task" && <TaskPage config={taskConfig} onConfigChange={setTaskConfig} runId={activeRunId} sending={isSending} onStop={stopActiveChat} onError={setError} />}
 
         {view === "memories" && <MemoriesPage memories={memories} loading={pageLoading} onRefresh={() => void loadMemories()} onUpdate={handleMemoryUpdate} onUndo={handleMemoryUndo} />}
         {view === "timeline" && <TimelinePage items={timeline} loading={pageLoading} review={review} reviewLoading={reviewLoading} periodDays={reviewPeriod} onPeriodChange={setReviewPeriod} onRefresh={() => void loadTimeline()} onGenerateReview={() => void handleGenerateReview()} />}

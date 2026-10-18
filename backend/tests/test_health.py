@@ -1,7 +1,10 @@
 from collections.abc import AsyncIterator
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.config.business import BusinessConfig, ToolConfig
+from app.config.local import LocalExecutionConfig
 from app.main import app
 from app.persistence.db import get_session
 
@@ -53,3 +56,14 @@ def test_config_endpoint_never_exposes_secrets() -> None:
     assert response.status_code == 200
     assert "dashscope_api_key" not in response.text
     assert response.json()["models"]["embedding_dimensions"] == 1024
+
+
+@pytest.mark.parametrize("local_enabled,tools_enabled", [(True, True), (False, True), (True, False)])
+def test_config_reports_project_file_access_switches(monkeypatch, local_enabled, tools_enabled):
+    import app.api.system as system_api
+
+    business = BusinessConfig(local=LocalExecutionConfig(enabled=local_enabled), tools=ToolConfig(enabled=tools_enabled))
+    monkeypatch.setattr(system_api, "get_business_config", lambda: business)
+    config = TestClient(app).get("/config").json()
+    assert config["local"]["enabled"] is local_enabled
+    assert config["tools"]["enabled"] is tools_enabled

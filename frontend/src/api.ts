@@ -42,12 +42,16 @@ export interface PublicConfig {
   agent: {
     context_token_budget: number;
     max_tool_rounds: number;
+    project_max_tool_rounds: number;
   };
   checkpoint: { ready: boolean; error: string | null };
+  local: { enabled: boolean };
+  tools: { enabled: boolean };
 }
 
 export interface ConversationSummary {
   id: string;
+  project_id?: string | null;
   title: string | null;
   created_at: string;
   updated_at: string;
