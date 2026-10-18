@@ -30,7 +30,7 @@
 backend/app/api/          HTTP and SSE endpoints
 backend/app/agent/        LangGraph state and nodes
 backend/app/execution/    Run lifecycle, cancellation and runtime coordination
-backend/app/workspace/    User-owned project directory bindings
+backend/app/workspace/    Project bindings, task snapshots and managed Git worktrees
 backend/app/config/       Configuration loading
 backend/app/protocol/     Protocol-independent tool contracts
 backend/app/tools/        Unified tool registry, execution and built-ins
@@ -62,11 +62,13 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
+开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)。截至 2026-10-18，阶段 0 至阶段 3 已通过门禁，阶段 4 尚未开始；最新完整回归为后端 226 项、前端 6 项通过，记忆离线评测仍保留 4 条既有质量失败。
+
 首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。统一 Tool 执行核心、官方 MCP stdio Client、legacy HTTP 兼容入口与最小 CLI 已完成。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取，以及绑定内容和模型版本的 Embedding 补偿任务。
 
 Graph 使用三个请求级内置记忆工具与 MCP 远程工具快照，通过同一 Function Calling 循环和 ToolExecutor 执行。统一管线校验 JSON Schema、显式能力权限、超时与取消，并写入 `tool.execution.*` 运行事件。系统使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用分批持久摘要与统一 Token 预算。Embedding 降级原因、补偿版本和上下文裁剪状态均写入可重放运行事件。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。详细验收见 [改造记录](docs/tool-mcp-implementation.md)；架构和使用说明见 [架构文档](docs/architecture.md) 与 [演示流程](docs/demo-script.md)。
 
-桌面化前阶段 1/2 已完成项目目录绑定、任务状态/取消、运行中事件回放、重启中断、目录互斥，以及本地文本文件工具、命令审批和 Windows 子进程树回收。接口与限制见[阶段 1 验收记录](docs/pre-desktop-stage1-run-control.md)和[阶段 2 验收记录](docs/pre-desktop-stage2-controlled-execution.md)。本地执行默认关闭，仅在可信本机设置 `[local].enabled = true` 并绑定项目目录后启用；命令与删除需要审批，MCP 连接配置不等于调用批准。默认使用原目录；Diff、撤销与真实 worktree 在阶段 3，正式任务和审批界面在阶段 4。API 同一数据库只允许一个运行实例，请使用单进程启动；这不是操作系统沙箱。
+桌面化前阶段 1/2/3 已完成项目目录绑定、任务状态/取消、运行中事件回放、重启中断、目录互斥、本地文本文件工具、命令审批、Windows 子进程树回收，以及任务基线 Diff、安全撤销和显式 Git worktree 的创建、带回与清理。接口与限制见[阶段 1 验收记录](docs/pre-desktop-stage1-run-control.md)、[阶段 2 验收记录](docs/pre-desktop-stage2-controlled-execution.md)和[阶段 3 验收记录](docs/pre-desktop-stage3-workspace-changes.md)。本地执行默认关闭，仅在可信本机设置 `[local].enabled = true` 并绑定项目目录后启用；命令与删除需要审批，MCP 连接配置不等于调用批准。默认使用原目录，用户显式选择时才创建 worktree；命令或 MCP 执行后不承诺自动撤销。正式任务、Diff、审批和 worktree 操作界面在阶段 4。API 同一数据库只允许一个运行实例，请使用单进程启动；这不是操作系统沙箱。
 
 ## 本地运行
 

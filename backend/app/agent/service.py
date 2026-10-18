@@ -23,13 +23,17 @@ from app.memory.service import MemoryService
 from app.models.qwen import create_chat_model, create_embedding_model
 from app.permission.approvals import ApprovalBroker, default_broker
 from app.persistence.models import MemoryStatus, MessageRole, RunStatus
+from app.persistence.projects import Project
 from app.persistence.repositories import ConversationRepository, MemoryRepository
 from app.protocol.tools import ToolExecutionContext
 from app.security.redaction import redact_secrets
 from app.tools.executor import ToolExecutor
+from app.tools.local.files import LocalFileError
 from app.tools.request import build_request_registry, request_permissions
+from app.workspace.journal import ChangeJournal
 from app.workspace.paths import DirectoryError
 from app.workspace.service import project_directory
+from app.workspace.worktrees import execution_worktree
 
 
 class AgentInputError(ValueError):
@@ -76,14 +80,17 @@ class AgentService:
         event_sink: EventSink | None = None,
         project_id: UUID | None = None,
         execution_mode: Literal["original", "worktree"] = "original",
+        worktree_id: UUID | None = None,
     ) -> dict[str, object]:
         lifecycle = RunLifecycle(self.session, self.controller, event_sink)
         try:
             return await self._chat(
                 user_key=user_key, content=content, conversation_id=conversation_id,
-                project_id=project_id, execution_mode=execution_mode, lifecycle=lifecycle,
+                project_id=project_id, execution_mode=execution_mode, worktree_id=worktree_id, lifecycle=lifecycle,
             )
-        except (DirectoryError, RunConflict) as error:
+        except (DirectoryError, RunConflict, LocalFileError) as error:
+            if lifecycle.registered:
+                await lifecycle.terminate(RunStatus.FAILED, error)
             raise AgentInputError(str(error)) from error
         except asyncio.CancelledError as error:
             if lifecycle.registered:
@@ -98,14 +105,16 @@ class AgentService:
 
     async def _chat(
         self, *, user_key: str, content: str, conversation_id: UUID | None,
-        project_id: UUID | None, execution_mode: str, lifecycle: RunLifecycle,
+        project_id: UUID | None, execution_mode: str, worktree_id: UUID | None, lifecycle: RunLifecycle,
     ) -> dict[str, object]:
         if not content.strip():
             raise AgentInputError("消息不能为空")
         if len(content) > self.business.security.max_input_chars:
             raise AgentInputError("消息超过长度限制")
-        if execution_mode != "original":
-            raise AgentInputError("worktree 模式尚未开放，未切换到原目录执行")
+        if execution_mode not in {"original", "worktree"} or (execution_mode == "original" and worktree_id is not None):
+            raise AgentInputError("执行模式与 worktree 选择不一致")
+        if execution_mode == "worktree" and (worktree_id is None or not self.business.local.enabled):
+            raise AgentInputError("worktree 模式需要启用本地执行并显式选择已创建的 worktree")
 
         redaction = redact_secrets(content)
         repository = ConversationRepository(self.session)
@@ -119,6 +128,11 @@ class AgentService:
                 raise AgentInputError("会话已绑定其他项目，请新建会话")
             project_id = conversation.project_id
         directory = await project_directory(self.session, user.id, project_id)
+        if execution_mode == "worktree":
+            if project_id is None:
+                raise AgentInputError("worktree 必须绑定项目")
+            project = await self.session.get(Project, project_id)
+            directory = await execution_worktree(self.session, user.id, project, worktree_id, self.business.local)
         if conversation is None:
             conversation = await repository.create_conversation(
                 user.id, title=redaction.text.strip()[:60]
@@ -137,8 +151,9 @@ class AgentService:
         )
         run = await repository.create_run(
             conversation.id, id=lifecycle.run_id, project_id=project_id,
-            execution_mode="original", execution_directory=directory,
+            execution_mode=execution_mode, execution_directory=directory,
         )
+        run.worktree_id = worktree_id
         emit = lifecycle.emit
 
         async def finish_success(
@@ -192,6 +207,7 @@ class AgentService:
             await lifecycle.terminate(RunStatus.FAILED, error)
 
         await emit("run.started", {"conversation_id": str(conversation.id)})
+        journal = await ChangeJournal.start(self.session, run, self.business.local) if directory and self.business.local.enabled else None
         command = parse_memory_command(redaction.text)
         if command:
             try:
@@ -409,7 +425,8 @@ class AgentService:
                 source_message_id=str(user_message.id), granted_permissions=request_permissions(local=self.business.local.enabled and directory is not None),
                 authorize=authorize,
                 project_id=str(project_id) if project_id else None,
-                execution_directory=directory, execution_mode="original",
+                execution_directory=directory, execution_mode=execution_mode,
+                change_journal=journal,
                 audit_sink=CallbackAuditSink(emit),
             )
             executor = ToolExecutor(tool_registry)

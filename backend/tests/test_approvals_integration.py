@@ -23,10 +23,12 @@ from app.permission.approvals import ApprovalBroker
 from app.persistence.approvals import Approval
 from app.persistence.models import Run, RunEvent, RunStatus, User
 from app.persistence.repositories import ConversationRepository
+from app.persistence.workspaces import TaskSnapshot
 from app.protocol.tools import ToolCall, ToolExecutionContext, ToolStatus
 from app.tools.executor import ToolExecutor
 from app.tools.local.registry import LOCAL_PERMISSIONS, create_local_tools
 from app.tools.registry import ToolRegistry
+from app.workspace.journal import ChangeJournal
 from app.workspace.paths import canonical_directory
 from app.workspace.service import bind_project
 from tests.test_local_process import wait_marker
@@ -296,6 +298,12 @@ async def test_real_agent_registry_read_edit_approved_command_and_durable_output
         commands = [event.payload["command_result"] for event in events if "command_result" in event.payload]
         assert commands[0]["exit_code"] == 0 and commands[0]["stdout"].strip() == "2"
         assert events[-1].event_type == "run.completed"
+        snapshot = await session.get(TaskSnapshot, response["run_id"])
+        changes = ChangeJournal(session, snapshot, scenario["config"]).preview()
+        assert changes["external_effects"]
+        assert not any(item["undoable"] for item in changes["changes"])
+        with pytest.raises(ValueError, match="外部执行"):
+            await ChangeJournal(session, snapshot, scenario["config"]).undo(changes["fingerprint"])
 
 
 @pytest.mark.asyncio
@@ -348,6 +356,9 @@ async def test_legacy_remote_http_requires_separate_call_approval_with_real_stdi
         response = await asyncio.wait_for(task, 5)
         assert response.status_code == 200 and response.json()["ok"]
         assert "approved" in json.dumps(response.json())
+        async with scenario["factory"]() as session:
+            snapshot = await session.get(TaskSnapshot, UUID(approval["run_id"]))
+            assert snapshot.external_effects
     finally:
         await manager.close()
         if previous is None:

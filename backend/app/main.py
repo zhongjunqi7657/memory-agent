@@ -13,6 +13,7 @@ from app.api.projects import router as projects_router
 from app.api.reviews import router as reviews_router
 from app.api.runs import router as runs_router
 from app.api.system import router as system_router
+from app.api.workspaces import router as workspaces_router
 from app.config.business import business_config_path, get_business_config
 from app.config.settings import get_settings
 from app.execution.controller import RunController
@@ -67,3 +68,4 @@ app.include_router(reviews_router)
 app.include_router(runs_router)
 app.include_router(projects_router)
 app.include_router(system_router)
+app.include_router(workspaces_router)

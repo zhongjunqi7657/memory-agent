@@ -29,6 +29,7 @@ class RunResponse(BaseModel):
     project_id: UUID | None
     execution_mode: str
     execution_directory: str | None
+    worktree_id: UUID | None
     status: RunStatus
     started_at: datetime | None
     finished_at: datetime | None

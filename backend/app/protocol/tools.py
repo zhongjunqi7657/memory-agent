@@ -94,3 +94,4 @@ class ToolExecutionContext:
     execution_directory: str | None = None
     execution_mode: str = "original"
     authorize: Callable[..., Awaitable[bool]] | None = None
+    change_journal: Any = None

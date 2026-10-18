@@ -106,6 +106,8 @@ class LocalTool:
         # detached writer thread continuing after the task releases its reservation.
         if self.operation in {"read", "list", "delete", "write"}:
             values["value"] = values.pop("path", ".")
+        if self.operation in {"write", "delete"} and context.change_journal:
+            return ToolResult.success(await context.change_journal.mutate(workspace, self.operation, values))
         return ToolResult.success(getattr(workspace, self.operation)(**values))
 
 

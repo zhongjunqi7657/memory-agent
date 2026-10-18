@@ -31,6 +31,7 @@ class ChatRequest(BaseModel):
     conversation_id: UUID | None = None
     project_id: UUID | None = None
     execution_mode: Literal["original", "worktree"] = "original"
+    worktree_id: UUID | None = None
 
 
 class ChatResponse(BaseModel):
@@ -64,7 +65,7 @@ async def chat(
             user_key=request.user_key,
             content=request.content,
             conversation_id=request.conversation_id,
-            project_id=request.project_id, execution_mode=request.execution_mode,
+            project_id=request.project_id, execution_mode=request.execution_mode, worktree_id=request.worktree_id,
         )
     except asyncio.CancelledError as error:
         raise HTTPException(status_code=409, detail="任务已取消") from error
@@ -99,7 +100,7 @@ async def chat_stream(
                         user_key=request.user_key,
                         content=request.content,
                         conversation_id=request.conversation_id,
-                        project_id=request.project_id, execution_mode=request.execution_mode,
+                        project_id=request.project_id, execution_mode=request.execution_mode, worktree_id=request.worktree_id,
                         event_sink=publish,
                     )
             except asyncio.CancelledError:

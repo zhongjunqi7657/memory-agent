@@ -62,6 +62,8 @@ class ToolExecutor:
                 elif not allowed or not self._registry.is_enabled(tool):
                     result = ToolResult(status=ToolStatus.DENIED, error=ToolError("approval_denied", ToolErrorCategory.PERMISSION, "工具调用未获批准或权限已失效"))
                 else:
+                    if context.change_journal and (tool.remote_name or tool.id == "builtin.local.command"):
+                        await context.change_journal.external_started()
                     result = await self._run_tool(tool, call.arguments, context)
                 if not isinstance(result, ToolResult) or not isinstance(result.status, ToolStatus) or (
                     result.status is ToolStatus.SUCCESS and result.error is not None

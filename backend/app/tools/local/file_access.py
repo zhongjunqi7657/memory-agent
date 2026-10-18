@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 @contextmanager
-def locked_file(path: Path, *, write=False, create=False, delete=False):
+def locked_file(path: Path, *, write=False, create=False, delete=False, parents=False):
     if os.name != "nt":
         flags = (os.O_RDWR if write else os.O_RDONLY) | os.O_NOFOLLOW
         if create:
@@ -15,6 +15,11 @@ def locked_file(path: Path, *, write=False, create=False, delete=False):
         directory = os.open(path.anchor, os.O_RDONLY | os.O_DIRECTORY)
         try:
             for part in path.parts[1:-1]:
+                if parents:
+                    try:
+                        os.mkdir(part, dir_fd=directory)
+                    except FileExistsError:
+                        pass
                 following = os.open(part, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=directory)
                 os.close(directory)
                 directory = following
@@ -60,6 +65,10 @@ def locked_file(path: Path, *, write=False, create=False, delete=False):
         current = Path(path.anchor)
         for part in path.parts[1:-1]:
             current /= part
+            if parents and not current.exists():
+                # All ancestors are already pinned without write/delete sharing.
+                # A competing link/create either fails mkdir or the no-follow open.
+                current.mkdir()
             # Share read only: rename, deletion, junction retargeting and writes
             # to each directory are excluded during this short file operation.
             parents.append(open_handle(current, 0x80, 3, 0x02000000))

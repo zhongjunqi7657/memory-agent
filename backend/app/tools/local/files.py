@@ -76,6 +76,10 @@ class FileWorkspace:
         return {"path": value, "content": redact_secrets(data.decode("utf-8-sig")).text, "version": version(data)}
 
     def write(self, value: str, content: str, expected_version: str | None) -> dict:
+        return self.replace_bytes(value, self.prepare_write(value, content, expected_version), expected_version)
+
+    def prepare_write(self, value: str, content: str, expected_version: str | None) -> bytes:
+        """Validate and encode without effects, for bounded durable write intent."""
         path = self.path(value)
         if "\0" in content or redact_secrets(content).redacted:
             raise LocalFileError("拒绝写入包含可识别秘密的内容")
@@ -94,9 +98,20 @@ class FileWorkspace:
             data = b"\xef\xbb\xbf" + data
         if len(data) > self.config.max_file_bytes:
             raise LocalFileError("文件超过大小限制")
+        return data
+
+    def replace_bytes(self, value: str, data: bytes, expected_version: str | None, *, create_parents=False, mode=None) -> dict:
+        """Version checked raw restore; do not normalize a saved BOM/newline."""
+        path = self.path(value)
+        if (len(data) > self.config.max_file_bytes or b"\0" in data
+                or redact_secrets(data.decode("utf-8-sig")).redacted):
+            raise LocalFileError("恢复内容无效或包含秘密")
+        original = self._read(path) if path.exists() else None
+        if (version(original) if original is not None else None) != expected_version:
+            raise LocalFileError("文件版本已改变，请重新读取")
         # Recheck immediately before writing; exclusive create never overwrites.
         self.path(value)
-        with locked_file(path, write=True, create=original is None) as stream:
+        with locked_file(path, write=True, create=original is None, parents=create_parents) as stream:
             info = os.fstat(stream.fileno())
             if info.st_nlink != 1 or not stat.S_ISREG(info.st_mode):
                 raise LocalFileError("文件身份已改变")
@@ -106,6 +121,8 @@ class FileWorkspace:
             stream.seek(0)
             stream.write(data)
             stream.truncate()
+            if mode is not None and os.name != "nt":
+                os.fchmod(stream.fileno(), mode)
             stream.flush()
             os.fsync(stream.fileno())
         return {"path": value, "version": version(data), "bytes": len(data)}

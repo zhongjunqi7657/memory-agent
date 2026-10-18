@@ -7,6 +7,8 @@ def test_initial_schema_contract() -> None:
         "users",
         "projects",
         "approvals",
+        "managed_worktrees",
+        "task_snapshots",
         "conversations",
         "messages",
         "runs",

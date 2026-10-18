@@ -172,6 +172,7 @@ class Run(TimestampMixin, Base):
     project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id"))
     execution_mode: Mapped[str] = mapped_column(String(20), default="original", server_default="original", nullable=False)
     execution_directory: Mapped[str | None] = mapped_column(Text)
+    worktree_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("managed_worktrees.id"))
 
     conversation: Mapped[Conversation] = relationship(back_populates="runs")
     events: Mapped[list[RunEvent]] = relationship(

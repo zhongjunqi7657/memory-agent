@@ -1,8 +1,9 @@
 """Single-process task handles. Directory reservations are not OS sandboxes."""
 
 import asyncio
+from contextlib import contextmanager
 from dataclasses import dataclass
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from app.workspace.paths import directories_overlap
 
@@ -38,6 +39,20 @@ class RunController:
 
     def release(self, run_id: UUID) -> None:
         self._runs.pop(run_id, None)
+
+    @contextmanager
+    def hold_directories(self, user_id: UUID, *directories: str):
+        """Serialize user workspace operations against live tasks and each other."""
+        handles = []
+        try:
+            for directory in dict.fromkeys(directories):
+                handle = uuid4()
+                self.register(handle, user_id, uuid4(), directory)
+                handles.append(handle)
+            yield
+        finally:
+            for handle in handles:
+                self.release(handle)
 
     def cancel(self, run_id: UUID, user_id: UUID) -> bool:
         active = self._runs.get(run_id)

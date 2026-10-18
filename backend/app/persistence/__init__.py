@@ -12,16 +12,19 @@ from app.persistence.models import (
     User,
 )
 from app.persistence.projects import Project
+from app.persistence.workspaces import ManagedWorktree, TaskSnapshot
 
 __all__ = [
     "Approval",
     "Base",
     "Conversation",
     "ExtractionJob",
+    "ManagedWorktree",
     "Memory",
     "Message",
     "Project",
     "Run",
     "RunEvent",
+    "TaskSnapshot",
     "User",
 ]

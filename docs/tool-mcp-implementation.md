@@ -2,6 +2,8 @@
 
 依据：桌面《Memory-Agent-Tool-MCP-CLI-文件级改造方案.md》。按六个阶段执行回归门禁。
 
+本文件保留 2026-10-09 Tool/MCP/CLI 改造的历史验收结果，其阶段编号与后续桌面化前方案不同。截至 2026-10-18，后续方案已完成阶段 0 至阶段 3；最新进度见[开发状态](development-status.md)，后续实施范围见[桌面化前方案](pre-desktop-implementation-plan.md)。
+
 ## 基线
 
 - 后端 97 passed、4 skipped；前端 4 passed；Ruff 通过。

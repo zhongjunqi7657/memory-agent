@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     app_port: int = 8000
     app_cors_origins: str = "http://localhost:5173,http://127.0.0.1:5173"
     demo_shared_password: str | None = None
+    app_data_dir: Path = Path(__file__).resolve().parents[3] / ".runtime"
 
     model_config = SettingsConfigDict(
         env_file=ENV_FILE,
