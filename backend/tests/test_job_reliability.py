@@ -94,7 +94,7 @@ async def test_completed_extraction_describes_created_and_conflicting_memories()
         sensitivity=MemorySensitivity.NORMAL,
         confidence=0.95,
         source_message_id=message_id,
-        metadata_={},
+        metadata_={"embedding_status": "ready"},
     )
     conflict = Memory(
         id=uuid4(),
@@ -104,7 +104,10 @@ async def test_completed_extraction_describes_created_and_conflicting_memories()
         sensitivity=MemorySensitivity.NORMAL,
         confidence=0.96,
         source_message_id=message_id,
-        metadata_={"conflicts_with": [str(previous_id)]},
+        metadata_={
+            "conflicts_with": [str(previous_id)],
+            "embedding_status": "pending",
+        },
     )
     extraction_job = SimpleNamespace(
         payload={"run_id": str(run_id)}, message_id=message_id
@@ -116,6 +119,11 @@ async def test_completed_extraction_describes_created_and_conflicting_memories()
 
     event = repository.events[0]
     assert event["event_type"] == "memory.extraction_completed"
+    assert event["payload"]["embedding"] == {
+        "ready": 1,
+        "pending": 1,
+        "unavailable": 0,
+    }
     assert [change["action"] for change in event["payload"]["changes"]] == [
         "created",
         "conflict_pending",
@@ -168,6 +176,8 @@ async def test_embedding_compensation_uses_durable_job_queue() -> None:
         memory=memory,
         message_id=uuid4(),
         conversation_id=uuid4(),
+        embedding_model="text-embedding-v3",
+        embedding_dimensions=1024,
     )
 
     assert queued.idempotency_key.startswith(f"embedding:{memory.id}:")
@@ -175,6 +185,9 @@ async def test_embedding_compensation_uses_durable_job_queue() -> None:
         "job_type": "embedding_backfill",
         "memory_id": str(memory.id),
         "run_id": None,
+        "content_version": queued.payload["content_version"],
+        "embedding_model": "text-embedding-v3",
+        "embedding_dimensions": 1024,
     }
     assert session.added == [queued]
 
@@ -199,6 +212,8 @@ async def test_completed_embedding_job_is_requeued_when_vector_is_missing() -> N
         memory=memory,
         message_id=uuid4(),
         conversation_id=uuid4(),
+        embedding_model="text-embedding-v3",
+        embedding_dimensions=1024,
     )
 
     assert queued is existing
@@ -208,4 +223,38 @@ async def test_completed_embedding_job_is_requeued_when_vector_is_missing() -> N
     assert existing.locked_by is None
     assert existing.finished_at is None
     assert existing.last_error is None
+    assert session.flush_count == 1
+
+
+@pytest.mark.asyncio
+async def test_completed_embedding_job_is_requeued_when_profile_is_stale() -> None:
+    existing = SimpleNamespace(
+        status=ExtractionJobStatus.COMPLETED,
+        attempts=1,
+        available_at=None,
+        locked_at=None,
+        locked_by=None,
+        finished_at=datetime.now(timezone.utc),
+        last_error=None,
+    )
+    session = FakeQueueSession(existing)
+    memory = Memory(
+        id=uuid4(),
+        user_id=uuid4(),
+        content="用户偏好先理解原理",
+        embedding=[1.0, 0.0],
+        metadata_={"embedding_status": "pending"},
+    )
+
+    queued = await ConversationRepository(session).queue_embedding_job(
+        memory=memory,
+        message_id=uuid4(),
+        conversation_id=uuid4(),
+        embedding_model="embedding-a",
+        embedding_dimensions=2,
+    )
+
+    assert queued is existing
+    assert existing.status is ExtractionJobStatus.QUEUED
+    assert existing.attempts == 0
     assert session.flush_count == 1

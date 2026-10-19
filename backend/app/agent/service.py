@@ -11,15 +11,19 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.agent.checkpoint import get_checkpointer
 from app.agent.context import estimate_tokens, prepare_conversation_context
 from app.agent.graph import build_graph, replace_checkpoint_messages
-from app.agent.tools import create_memory_tools
+from app.audit.sink import CallbackAuditSink
 from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import Settings, get_settings
 from app.memory.commands import MemoryCommandType, parse_memory_command
+from app.memory.embeddings import embed_text, embedding_fallback_payload
 from app.memory.service import MemoryService
 from app.models.qwen import create_chat_model, create_embedding_model
 from app.persistence.models import MemoryStatus, MessageRole, RunStatus
 from app.persistence.repositories import ConversationRepository, MemoryRepository
+from app.protocol.tools import ToolExecutionContext
 from app.security.redaction import redact_secrets
+from app.tools.executor import ToolExecutor
+from app.tools.request import build_request_registry, request_permissions
 
 
 class AgentInputError(ValueError):
@@ -39,11 +43,13 @@ class AgentService:
         embedding_model=_AUTO_EMBEDDING,
         settings: Settings | None = None,
         business: BusinessConfig | None = None,
+        mcp_manager=None,
     ):
         self.session = session
         self.settings = settings or get_settings()
         self.business = business or get_business_config()
         self.chat_model = chat_model
+        self.mcp_manager = mcp_manager
         self.embedding_model = None
         if embedding_model is _AUTO_EMBEDDING and self.settings.dashscope_api_key:
             self.embedding_model = create_embedding_model(
@@ -255,15 +261,29 @@ class AgentService:
                 await finish_failure(error)
                 raise
 
-        query_embedding = None
-        if self.embedding_model:
-            try:
-                query_embedding = await self.embedding_model.aembed_query(redaction.text)
-                await emit(
-                    "memory.embedding_ready", {"dimensions": len(query_embedding)}
-                )
-            except Exception:  # noqa: BLE001 - retrieval must fall back safely
-                await emit("memory.embedding_fallback")
+        embedding_attempt = await embed_text(
+            self.embedding_model,
+            redaction.text,
+            expected_dimensions=self.business.models.embedding_dimensions,
+        )
+        query_embedding = embedding_attempt.vector
+        if embedding_attempt.ready:
+            await emit(
+                "memory.embedding_ready",
+                {
+                    "dimensions": len(query_embedding or []),
+                    "model": self.business.models.embedding_model,
+                },
+            )
+        else:
+            await emit(
+                "memory.embedding_fallback",
+                embedding_fallback_payload(
+                    embedding_attempt,
+                    expected_dimensions=self.business.models.embedding_dimensions,
+                    source="automatic_retrieval",
+                ),
+            )
         scored_memories = await MemoryRepository(self.session).search_hybrid(
             user.id,
             redaction.text,
@@ -276,16 +296,25 @@ class AgentService:
             type_weight=self.business.memory.type_weight,
             recency_half_life_days=self.business.memory.recency_half_life_days,
             min_relevance_score=self.business.memory.min_relevance_score,
+            embedding_model_name=self.business.models.embedding_model,
+            embedding_dimensions=self.business.models.embedding_dimensions,
         )
         injected: list = []
         injected_tokens = 0
+        current_input_tokens = estimate_tokens(redaction.text) + 4
+        injection_budget = max(
+            0,
+            min(
+                self.business.memory.max_injected_tokens,
+                self.business.agent.context_token_budget
+                - self.business.agent.context_system_reserve_tokens
+                - current_input_tokens,
+            ),
+        )
         for item in scored_memories:
             item_tokens = estimate_tokens(item.memory.content) + 4
-            if injected and (
-                injected_tokens + item_tokens
-                > self.business.memory.max_injected_tokens
-            ):
-                break
+            if injected_tokens + item_tokens > injection_budget:
+                continue
             injected.append(item)
             injected_tokens += item_tokens
         scored_memories = injected
@@ -332,12 +361,15 @@ class AgentService:
                 {
                     "message_count": len(context.messages),
                     "estimated_tokens": context.estimated_tokens,
+                    "budget": self.business.agent.context_token_budget,
+                    "reserved_tokens": context.reserved_tokens,
                     "summary_used": bool(context.summary),
+                    "truncated": context.truncated,
                 },
             )
             if context.summarized:
                 await emit("session.summary_updated")
-            tools = create_memory_tools(
+            tool_registry = build_request_registry(
                 self.session,
                 user_id=user.id,
                 conversation_id=conversation.id,
@@ -345,14 +377,24 @@ class AgentService:
                 business=self.business,
                 embedding_model=self.embedding_model,
                 emit=emit,
+                manager=self.mcp_manager,
             )
+            execution_context = ToolExecutionContext(
+                run_id=str(run.id), agent_id="memory-agent",
+                user_id=str(user.id), conversation_id=str(conversation.id),
+                source_message_id=str(user_message.id), granted_permissions=request_permissions(self.mcp_manager),
+                audit_sink=CallbackAuditSink(emit),
+            )
+            executor = ToolExecutor(tool_registry)
             checkpointer = get_checkpointer()
             graph_messages = context.messages
             if checkpointer is not None:
                 graph_messages = replace_checkpoint_messages(graph_messages)
             result = await build_graph(
                 chat_model,
-                tools=tools,
+                tools=tool_registry.function_schemas(),
+                tool_executor=executor,
+                tool_context=execution_context,
                 max_tool_rounds=self.business.agent.max_tool_rounds,
                 checkpointer=checkpointer,
             ).ainvoke(

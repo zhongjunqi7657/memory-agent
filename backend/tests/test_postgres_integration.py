@@ -12,7 +12,7 @@ from uuid import uuid4
 import pytest
 from httpx import ASGITransport, AsyncClient
 from langchain_core.language_models.fake_chat_models import FakeChatModel
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from sqlalchemy import delete, select, text
 from sqlalchemy.engine import make_url
@@ -24,11 +24,14 @@ from sqlalchemy.ext.asyncio import (
 
 import app.api.chat as chat_api
 from app.agent import service as agent_service
+from app.agent.checkpoint import checkpoint_lifespan, get_checkpointer
 from app.agent.service import AgentService
-from app.config.business import get_business_config
+from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import Settings
 from app.jobs import worker
 from app.main import app
+from app.mcp.manager import MCPConnectionManager
+from app.memory.embeddings import embedding_content_version
 from app.memory.extractor import ExtractedMemory, ExtractionResult, MemoryExtractor
 from app.memory.service import MemoryService
 from app.persistence.db import get_session, get_session_factory
@@ -40,9 +43,13 @@ from app.persistence.models import (
     MemorySensitivity,
     MemoryStatus,
     MessageRole,
+    Run,
+    RunEvent,
+    RunStatus,
     User,
 )
 from app.persistence.repositories import ConversationRepository, MemoryRepository
+from tests.test_mcp_stdio_integration import fixture_config, process_alive
 
 
 class RecordingChatModel(FakeChatModel):
@@ -57,6 +64,37 @@ class RecordingChatModel(FakeChatModel):
                 )
             ]
         )
+
+
+class CombinedToolsModel(FakeChatModel):
+    calls: int = 0
+    bound_names: ClassVar[set[str]] = set()
+
+    def bind_tools(self, tools, **kwargs):
+        type(self).bound_names = {tool["function"]["name"] for tool in tools}
+        return self
+
+    def _generate(self, messages, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            response = AIMessage(content="", tool_calls=[
+                {"id": "builtin", "name": "builtin__memory__timeline", "args": {}},
+                {"id": "remote", "name": "mcp__fixture__remote_echo", "args": {"value": "ok"}},
+                {"id": "invalid", "name": "mcp__fixture__remote_echo", "args": {}},
+            ])
+        elif self.calls == 2:
+            results = [message for message in messages if isinstance(message, ToolMessage)]
+            assert [item.tool_call_id for item in results] == ["builtin", "remote", "invalid"]
+            assert [item.status for item in results] == ["success", "success", "error"]
+            response = AIMessage(content="", tool_calls=[
+                {"id": "recovered", "name": "mcp__fixture__remote_echo", "args": {"value": "retry-valid-input"}},
+            ])
+        else:
+            response = AIMessage(content="两类工具执行与失败恢复完成")
+        return ChatResult(generations=[ChatGeneration(message=response)])
+
+    async def _agenerate(self, messages, **kwargs):
+        return self._generate(messages, **kwargs)
 
 
 @pytest.fixture
@@ -78,6 +116,48 @@ async def postgres_factory() -> AsyncIterator[async_sessionmaker[AsyncSession]]:
 
     yield async_sessionmaker(engine, expire_on_commit=False)
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_agent_combines_builtin_and_real_mcp_with_persisted_audit_and_checkpoint(
+    postgres_factory, tmp_path
+):
+    marker = tmp_path / "pid.txt"
+    config = fixture_config(marker)
+    manager = MCPConnectionManager(config)
+    settings = Settings(_env_file=None, dashscope_api_key="",
+                        database_url=os.environ["TEST_DATABASE_URL"])
+    external_key = f"combined-mcp-{uuid4()}"
+    model = CombinedToolsModel()
+    try:
+        await manager.start()
+        assert manager.status()[0]["status"] == "ready"
+        async with checkpoint_lifespan(settings), postgres_factory() as session:
+                response = await AgentService(session, chat_model=model, embedding_model=None,
+                    business=BusinessConfig(mcp=config), settings=settings, mcp_manager=manager).chat(
+                    user_key=external_key, content="查询记忆与外部工具")
+                run = await session.get(Run, response["run_id"])
+                assert run.status is RunStatus.COMPLETED
+                events = list(await session.scalars(select(RunEvent).where(
+                    RunEvent.run_id == run.id, RunEvent.event_type.like("tool.execution.%")
+                ).order_by(RunEvent.sequence)))
+                assert len(events) == 8
+                assert [event.payload["source"] for event in events[::2]] == ["builtin", "mcp", "mcp", "mcp"]
+                assert [event.event_type for event in events[1::2]] == [
+                    "tool.execution.completed", "tool.execution.completed",
+                    "tool.execution.failed", "tool.execution.completed",
+                ]
+                checkpoint = await get_checkpointer().aget_tuple({"configurable": {
+                    "thread_id": str(response["conversation_id"])}})
+                assert checkpoint is not None
+                assert checkpoint.checkpoint["channel_values"]["tool_rounds"] == 2
+                assert response["message"] == "两类工具执行与失败恢复完成"
+                assert {"builtin__memory__timeline", "mcp__fixture__remote_echo"} <= model.bound_names
+    finally:
+        await manager.close()
+        async with postgres_factory() as session, session.begin():
+            await session.execute(delete(User).where(User.external_key == external_key))
+    assert not process_alive(int(marker.read_text()))
 
 
 @pytest.mark.asyncio
@@ -209,6 +289,97 @@ async def test_migrated_schema_vector_io_and_worker_locking(
             assert claimed_job is not None
             assert claimed_job.status is ExtractionJobStatus.RUNNING
             assert claimed_job.locked_by == "test-worker"
+    finally:
+        async with postgres_factory() as session, session.begin():
+            await session.execute(delete(User).where(User.external_key == external_key))
+
+
+@pytest.mark.asyncio
+async def test_embedding_worker_skips_stale_content_version(
+    postgres_factory: async_sessionmaker[AsyncSession], monkeypatch
+) -> None:
+    external_key = f"postgres-embedding-version-{uuid4()}"
+    original = "用户偏好先理解原理"
+    updated = "用户偏好直接看示例"
+    vector = [1.0, *([0.0] * 1023)]
+
+    class RecordingEmbeddingModel:
+        def __init__(self) -> None:
+            self.queries: list[str] = []
+
+        async def aembed_query(self, query: str):
+            self.queries.append(query)
+            return vector
+
+    model = RecordingEmbeddingModel()
+    business = get_business_config()
+    try:
+        async with postgres_factory() as session, session.begin():
+            repository = ConversationRepository(session)
+            user = await repository.get_or_create_user(external_key)
+            conversation = await repository.create_conversation(user.id)
+            message = await repository.add_message(
+                conversation.id,
+                role=MessageRole.USER,
+                content=original,
+                sequence=1,
+            )
+            memory = Memory(
+                user_id=user.id,
+                kind=MemoryKind.SEMANTIC,
+                status=MemoryStatus.ACTIVE,
+                sensitivity=MemorySensitivity.NORMAL,
+                content=original,
+                confidence=Decimal("1.000"),
+                source_message_id=message.id,
+                source_message_ids=[str(message.id)],
+                conversation_id=conversation.id,
+                metadata_={"embedding_status": "pending"},
+            )
+            session.add(memory)
+            await session.flush()
+            stale_job = await repository.queue_embedding_job(
+                memory=memory,
+                message_id=message.id,
+                conversation_id=conversation.id,
+                embedding_model=business.models.embedding_model,
+                embedding_dimensions=business.models.embedding_dimensions,
+            )
+            memory.content = updated
+            memory_id = memory.id
+            stale_job_id = stale_job.id
+
+        monkeypatch.setattr(worker, "SessionFactory", postgres_factory)
+        monkeypatch.setattr(worker, "create_embedding_model", lambda **_kwargs: model)
+
+        assert await worker.process_one() is True
+        assert model.queries == []
+        assert await worker.process_one() is True
+        assert model.queries == [updated]
+
+        async with postgres_factory() as session:
+            stored = await session.get(Memory, memory_id)
+            stale_job = await session.get(ExtractionJob, stale_job_id)
+            assert stored is not None
+            jobs = list(
+                (
+                    await session.scalars(
+                        select(ExtractionJob).where(
+                            ExtractionJob.user_id == stored.user_id,
+                            ExtractionJob.payload["job_type"].astext
+                            == "embedding_backfill",
+                        )
+                    )
+                ).all()
+            )
+
+        assert list(stored.embedding) == vector
+        assert stored.metadata_["embedding_content_version"] == (
+            embedding_content_version(updated)
+        )
+        assert stale_job.status is ExtractionJobStatus.COMPLETED
+        assert len(jobs) == 2
+        assert all(job.status is ExtractionJobStatus.COMPLETED for job in jobs)
     finally:
         async with postgres_factory() as session, session.begin():
             await session.execute(delete(User).where(User.external_key == external_key))
@@ -366,8 +537,8 @@ async def test_sse_chat_recalls_memory_across_conversations(
         async with postgres_factory() as session:
             yield session
 
-    def create_agent(session: AsyncSession) -> AgentService:
-        return AgentService(session, settings=settings)
+    def create_agent(session: AsyncSession, **kwargs) -> AgentService:
+        return AgentService(session, settings=settings, **kwargs)
 
     def create_model(**_kwargs):
         nonlocal model_factory_calls
@@ -471,6 +642,7 @@ async def test_sse_chat_recalls_memory_across_conversations(
         assert recalled.status_code == 200
         assert event_types == [
             "run.started",
+            "memory.embedding_fallback",
             "memory.retrieved",
             "session.loaded",
             "model.completed",
@@ -478,15 +650,37 @@ async def test_sse_chat_recalls_memory_across_conversations(
             "run.completed",
         ]
         assert completed["payload"]["memory_count"] == 1
+        assert events[1]["payload"] == {
+            "source": "automatic_retrieval",
+            "reason": "provider_unavailable",
+            "expected_dimensions": 1024,
+        }
+        loaded_event = next(
+            event for event in events if event["event_type"] == "session.loaded"
+        )
+        assert loaded_event["payload"]["estimated_tokens"] <= (
+            loaded_event["payload"]["budget"]
+        )
         assert "用户的学习方式是通过实例学习" in model.prompts[-1]
         assert model_factory_calls == 2
         assert replayed.status_code == 200
-        assert [event["sequence"] for event in replayed.json()] == [2, 3, 4, 5, 6, 7]
+        assert [event["sequence"] for event in replayed.json()] == [
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+        ]
         assert replayed.json()[-1] == {
             "run_id": completed["run_id"],
-            "sequence": 7,
+            "sequence": 8,
             "event_type": "memory.extraction_completed",
-            "payload": {"changes": []},
+            "payload": {
+                "changes": [],
+                "embedding": {"ready": 0, "pending": 0, "unavailable": 0},
+            },
         }
         assert restored.status_code == 200
         restored_assistant = [

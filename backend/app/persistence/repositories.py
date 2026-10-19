@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
-import hashlib
 from uuid import UUID
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from app.config.business import ModelConfig
+from app.memory.embeddings import (
+    embedding_content_version,
+    embedding_is_current,
+    embedding_profile_version,
+)
 from app.memory.retrieval import ScoredMemory, rank_memories
 from app.persistence.models import (
     Conversation,
@@ -88,6 +93,16 @@ class ConversationRepository:
             .limit(limit)
         )
         return list(reversed(result.all()))
+
+    async def get_message(
+        self, message_id: UUID, conversation_id: UUID
+    ) -> Message | None:
+        return await self.session.scalar(
+            select(Message).where(
+                Message.id == message_id,
+                Message.conversation_id == conversation_id,
+            )
+        )
 
     async def list_recent_messages(
         self, conversation_id: UUID, limit: int
@@ -234,10 +249,17 @@ class ConversationRepository:
         memory: Memory,
         message_id: UUID,
         conversation_id: UUID,
+        embedding_model: str,
+        embedding_dimensions: int,
         run_id: str | None = None,
     ) -> ExtractionJob:
-        content_version = hashlib.sha256(memory.content.encode("utf-8")).hexdigest()[:16]
-        idempotency_key = f"embedding:{memory.id}:{content_version}"
+        content_version = embedding_content_version(memory.content)
+        profile_version = embedding_profile_version(
+            model=embedding_model, dimensions=embedding_dimensions
+        )
+        idempotency_key = (
+            f"embedding:{memory.id}:{content_version}:{profile_version}"
+        )
         existing = await self.session.scalar(
             select(ExtractionJob).where(
                 ExtractionJob.idempotency_key == idempotency_key
@@ -245,7 +267,14 @@ class ConversationRepository:
         )
         if existing:
             if (
-                memory.embedding is None
+                not embedding_is_current(
+                    memory,
+                    config=ModelConfig(
+                        embedding_model=embedding_model,
+                        embedding_dimensions=embedding_dimensions,
+                    ),
+                    allow_legacy=False,
+                )
                 and existing.status
                 in {ExtractionJobStatus.COMPLETED, ExtractionJobStatus.FAILED}
             ):
@@ -268,6 +297,9 @@ class ConversationRepository:
                 "job_type": "embedding_backfill",
                 "memory_id": str(memory.id),
                 "run_id": run_id,
+                "content_version": content_version,
+                "embedding_model": embedding_model,
+                "embedding_dimensions": embedding_dimensions,
             },
         )
         self.session.add(job)
@@ -327,6 +359,8 @@ class MemoryRepository:
         type_weight: float = 0.05,
         recency_half_life_days: int = 30,
         min_relevance_score: float = 0.08,
+        embedding_model_name: str | None = None,
+        embedding_dimensions: int | None = None,
     ) -> list[ScoredMemory]:
         candidates = await self.list_active_search_candidates(
             user_id,
@@ -345,6 +379,8 @@ class MemoryRepository:
             type_weight=type_weight,
             recency_half_life_days=recency_half_life_days,
             min_relevance_score=min_relevance_score,
+            embedding_model_name=embedding_model_name,
+            embedding_dimensions=embedding_dimensions,
             limit=limit,
         )
 

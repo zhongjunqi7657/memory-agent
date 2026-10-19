@@ -38,6 +38,15 @@ const eventLabels: Record<string, string> = {
   "session.summary_updated": "会话摘要已更新",
   "tool.started": "工具开始执行",
   "tool.completed": "工具执行完成",
+  "mcp.tool.started": "MCP 工具开始执行",
+  "mcp.tool.completed": "MCP 工具执行完成",
+  "mcp.tool.failed": "MCP 工具执行失败",
+  "mcp.tool.denied": "MCP 工具调用被拒绝",
+  "tool.execution.started": "工具开始执行",
+  "tool.execution.completed": "工具执行完成",
+  "tool.execution.failed": "工具执行失败",
+  "tool.execution.denied": "工具权限不足",
+  "tool.execution.cancelled": "工具调用已取消",
   "model.completed": "回答已生成",
   "memory.extraction_queued": "记忆提取已入队",
   "memory.command_applied": "记忆指令已处理",
@@ -47,9 +56,20 @@ const eventLabels: Record<string, string> = {
   "run.failed": "运行失败",
 };
 
+const embeddingFallbackLabels: Record<string, string> = {
+  provider_unavailable: "未配置 Embedding 服务",
+  provider_error: "Embedding 服务调用失败",
+  dimension_mismatch: "Embedding 返回维度不匹配",
+};
+
 function eventDescription(event: RunEvent) {
   if (event.event_type === "memory.embedding_ready") {
     return `${String(event.payload.dimensions ?? 0)} 维`;
+  }
+  if (event.event_type === "memory.embedding_fallback") {
+    const reason = String(event.payload.reason ?? "unknown");
+    const source = event.payload.source === "search_memory" ? "工具检索" : "自动召回";
+    return `${source} · ${embeddingFallbackLabels[reason] ?? "语义向量不可用"}`;
   }
   if (event.event_type === "memory.command_applied") {
     return `${String(event.payload.command ?? "记忆操作")} · ${String(event.payload.outcome ?? "已处理")}`;
@@ -57,15 +77,29 @@ function eventDescription(event: RunEvent) {
   if (event.event_type === "memory.retrieved") {
     return `${String(event.payload.count ?? 0)} 条匹配`;
   }
-  if (event.event_type === "tool.started" || event.event_type === "tool.completed") {
-    return String(event.payload.tool ?? "记忆工具");
+  if (
+    event.event_type === "tool.started" ||
+    event.event_type === "tool.completed" ||
+    event.event_type === "mcp.tool.started" ||
+    event.event_type === "mcp.tool.completed" ||
+    event.event_type === "mcp.tool.failed" ||
+    event.event_type === "mcp.tool.denied" ||
+    event.event_type.startsWith("tool.execution.")
+  ) {
+    const tool = String(event.payload.tool_id ?? event.payload.tool ?? "记忆工具");
+    const errorCode = event.payload.error_code;
+    return errorCode ? `${tool} · ${String(errorCode)}` : tool;
   }
   if (event.event_type === "session.loaded") {
-    return `${String(event.payload.message_count ?? 0)} 条消息 · 约 ${String(event.payload.estimated_tokens ?? 0)} tokens`;
+    const truncated = event.payload.truncated ? " · 已按预算裁剪" : "";
+    return `${String(event.payload.message_count ?? 0)} 条消息 · 约 ${String(event.payload.estimated_tokens ?? 0)}/${String(event.payload.budget ?? 0)} tokens${truncated}`;
   }
   if (event.event_type === "memory.extraction_completed") {
     const changes = Array.isArray(event.payload.changes) ? event.payload.changes.length : 0;
-    return changes > 0 ? `${changes} 项记忆变化` : "未发现需要保存的记忆";
+    const embedding = event.payload.embedding as { pending?: number; unavailable?: number } | undefined;
+    const fallbackCount = Number(embedding?.pending ?? 0) + Number(embedding?.unavailable ?? 0);
+    const fallback = fallbackCount > 0 ? ` · ${fallbackCount} 项暂未生成向量` : "";
+    return changes > 0 ? `${changes} 项记忆变化${fallback}` : "未发现需要保存的记忆";
   }
   if (event.event_type === "memory.extraction_failed") {
     return `${String(event.payload.message ?? "记忆提取失败")} · 已尝试 ${String(event.payload.attempts ?? 0)} 次`;

@@ -1,0 +1,81 @@
+.markdown-content {
+  min-width: 0;
+  max-width: 100%;
+  color: #2f383d;
+  font-size: 14px;
+  line-height: 1.75;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.markdown-content > :first-child { margin-top: 0; }
+.markdown-content > :last-child { margin-bottom: 0; }
+.markdown-content p { margin: 0 0 12px; }
+.markdown-content h1,
+.markdown-content h2,
+.markdown-content h3,
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 {
+  margin: 24px 0 10px;
+  color: #293c36;
+  font-weight: 500;
+  line-height: 1.5;
+}
+.markdown-content h1 { font-size: 22px; }
+.markdown-content h2 { font-size: 19px; }
+.markdown-content h3 { font-size: 17px; }
+.markdown-content h4,
+.markdown-content h5,
+.markdown-content h6 { font-size: 15px; }
+.markdown-content strong { font-weight: 600; }
+.markdown-content ul,
+.markdown-content ol { margin: 0 0 12px; padding-left: 24px; }
+.markdown-content li { margin: 4px 0; }
+.markdown-content li > p { margin-bottom: 6px; }
+.markdown-content li > ul,
+.markdown-content li > ol { margin-top: 4px; margin-bottom: 4px; }
+.markdown-content .contains-task-list { list-style: none; padding-left: 4px; }
+.markdown-content .task-list-item input { margin-right: 8px; accent-color: #49766a; }
+.markdown-content blockquote {
+  margin: 14px 0;
+  padding: 2px 0 2px 14px;
+  border-left: 2px solid #b8ccc4;
+  color: #586760;
+}
+.markdown-content blockquote > :last-child { margin-bottom: 0; }
+.markdown-content a { color: #346b5b; text-decoration: underline; text-underline-offset: 3px; }
+.markdown-content a:hover { color: #244e42; }
+.markdown-content hr { margin: 22px 0; border: 0; border-top: 1px solid #dfe5e2; }
+.markdown-content code {
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: #eef1f3;
+  font-family: Consolas, "Cascadia Code", monospace;
+  font-size: .92em;
+}
+.markdown-content pre {
+  max-width: 100%;
+  margin: 14px 0;
+  padding: 12px 14px;
+  overflow-x: auto;
+  border: 1px solid #dfe4e7;
+  border-radius: 5px;
+  background: #f3f5f6;
+  line-height: 1.65;
+  overflow-wrap: normal;
+  white-space: pre;
+}
+.markdown-content pre code { padding: 0; border-radius: 0; background: transparent; }
+.markdown-table-scroll { max-width: 100%; margin: 14px 0; overflow-x: auto; }
+.markdown-table-scroll:focus-visible { outline: 2px solid #85a89c; outline-offset: 2px; }
+.markdown-content table { width: 100%; border-collapse: collapse; text-align: left; }
+.markdown-content th,
+.markdown-content td {
+  min-width: 120px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #dfe5e2;
+  vertical-align: top;
+}
+.markdown-content th { color: #34443f; background: #f1f4f3; font-weight: 500; }
+.markdown-content img { max-width: 100%; height: auto; }

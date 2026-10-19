@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config.business import get_business_config
 from app.config.settings import get_settings
 from app.memory.service import MemoryService
 from app.persistence.db import get_session
@@ -28,10 +29,13 @@ async def _queue_embedding_if_needed(
         and memory.conversation_id
         and get_settings().dashscope_api_key
     ):
+        business = get_business_config()
         await ConversationRepository(session).queue_embedding_job(
             memory=memory,
             message_id=memory.source_message_id,
             conversation_id=memory.conversation_id,
+            embedding_model=business.models.embedding_model,
+            embedding_dimensions=business.models.embedding_dimensions,
         )
 
 

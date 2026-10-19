@@ -6,15 +6,21 @@ from collections.abc import Sequence
 from typing import Annotated, TypedDict
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import AIMessage, BaseMessage, RemoveMessage, SystemMessage
-from langchain_core.runnables import RunnableConfig
-from langchain_core.tools import BaseTool
+from langchain_core.messages import (
+    AIMessage,
+    BaseMessage,
+    RemoveMessage,
+    SystemMessage,
+    ToolMessage,
+)
 from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
-from langgraph.prebuilt import ToolNode
 
+from app.agent.tool_node import UnifiedToolNode
 from app.memory.commands import parse_memory_command
+from app.protocol.tools import ToolExecutionContext
+from app.tools.executor import ToolExecutor
 
 
 class AgentState(TypedDict, total=False):
@@ -57,7 +63,9 @@ def _system_message(state: AgentState, system_prompt: str) -> SystemMessage:
 def build_graph(
     chat_model: BaseChatModel,
     *,
-    tools: Sequence[BaseTool] = (),
+    tools: Sequence[dict] = (),
+    tool_executor: ToolExecutor | None = None,
+    tool_context: ToolExecutionContext | None = None,
     max_tool_rounds: int = 4,
     checkpointer: BaseCheckpointSaver | None = None,
     system_prompt: str = SYSTEM_PROMPT,
@@ -118,7 +126,9 @@ def build_graph(
             checkpointer=checkpointer,
             system_prompt=system_prompt,
         )
-    tool_node = ToolNode(list(tools))
+    if tool_executor is None or tool_context is None:
+        raise ValueError("工具 Schema 必须同时注入执行器和上下文")
+    tool_node = UnifiedToolNode(tool_executor, tool_context)
 
     async def call_model_with_tools(
         state: AgentState,
@@ -128,14 +138,8 @@ def build_graph(
         )
         return {"messages": [response]}
 
-    async def execute_tools(
-        state: AgentState, config: RunnableConfig
-    ) -> dict[str, object]:
-        result = await tool_node.ainvoke(state, config)
-        return {
-            "messages": result["messages"],
-            "tool_rounds": state.get("tool_rounds", 0) + 1,
-        }
+    async def execute_tools(state: AgentState) -> dict[str, object]:
+        return await tool_node(state)
 
     def route_model(state: AgentState) -> str:
         last_message = state["messages"][-1]
@@ -146,9 +150,13 @@ def build_graph(
             return "limit"
         return "tools"
 
-    def tool_limit(_state: AgentState) -> dict[str, list[BaseMessage]]:
+    def tool_limit(state: AgentState) -> dict[str, list[BaseMessage]]:
         return {
             "messages": [
+                *[ToolMessage(
+                    content="工具调用已达到本轮上限", tool_call_id=call["id"],
+                    name=call["name"], status="error",
+                ) for call in state["messages"][-1].tool_calls],
                 AIMessage(
                     content="工具调用已达到本轮上限。请缩小问题范围后再试。"
                 )

@@ -22,7 +22,7 @@
 - API 与记忆提取 Worker 分进程运行
 - SSE 传输主 Agent 运行事件
 
-首版不包含文件知识库、外部系统、语音、渠道接入、真正的子 Agent 或多供应商切换。
+当前支持 stdio MCP 外部工具接入；文件知识库、语音、渠道接入、子 Agent 与多供应商切换不在本次范围。
 
 ## 目录
 
@@ -30,6 +30,12 @@
 backend/app/api/          HTTP and SSE endpoints
 backend/app/agent/        LangGraph state and nodes
 backend/app/config/       Configuration loading
+backend/app/protocol/     Protocol-independent tool contracts
+backend/app/tools/        Unified tool registry, execution and built-ins
+backend/app/permission/   Explicit capability authorization
+backend/app/audit/        Tool execution audit sinks
+backend/app/mcp/          Official SDK stdio MCP client and legacy HTTP adapters
+backend/app/cli/          Model-independent human commands
 backend/app/jobs/         Persistent extraction worker
 backend/app/memory/       Memory extraction, policy and retrieval
 backend/app/models/       Qwen model adapters
@@ -54,9 +60,9 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。异步记忆事件展示已完成验收；当前进入普通聊天冲突治理，重点修复缺少字面重合时的语义冲突漏检。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取和 Embedding 补偿任务。
+首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。统一 Tool 执行核心、官方 MCP stdio Client、legacy HTTP 兼容入口与最小 CLI 已完成。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取，以及绑定内容和模型版本的 Embedding 补偿任务。
 
-Graph 提供 `search_memory`、`get_user_timeline`、`propose_memory_update` 三个受控工具及循环上限，使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用持久摘要与 Token 预算。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。当前进度和下一步验收边界见 [开发状态](docs/development-status.md)；详细状态图、ER 图和面试说明见 [架构文档](docs/architecture.md)、[演示流程](docs/demo-script.md) 与 [面试问答](docs/interview-guide.md)。
+Graph 使用三个请求级内置记忆工具与 MCP 远程工具快照，通过同一 Function Calling 循环和 ToolExecutor 执行。统一管线校验 JSON Schema、显式能力权限、超时与取消，并写入 `tool.execution.*` 运行事件。系统使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用分批持久摘要与统一 Token 预算。Embedding 降级原因、补偿版本和上下文裁剪状态均写入可重放运行事件。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。详细验收见 [改造记录](docs/tool-mcp-implementation.md)；架构和使用说明见 [架构文档](docs/architecture.md) 与 [演示流程](docs/demo-script.md)。
 
 ## 本地运行
 
@@ -64,7 +70,7 @@ Graph 提供 `search_memory`、`get_user_timeline`、`propose_memory_update` 三
 2. 复制业务配置：`Copy-Item config.toml.example config.toml`，按需调整模型名和阈值。
 3. 启动数据库：`docker compose up -d postgres`。
 4. 执行迁移：`cd backend; uv run alembic upgrade head`。
-5. 启动 API：`uv run uvicorn app.main:app --reload`。
+5. 启动 API：`uv run uvicorn app.main:app --loop app.runtime:event_loop --reload`。
 6. 单独启动记忆 Worker：`uv run python -m app.jobs.worker`。
 
 另开一个终端启动前端：`cd frontend; npm install; npm run dev`，然后访问 `http://127.0.0.1:5173`。前端会将 `/v1`、`/health` 和 `/config` 请求代理到 FastAPI；也可以通过 `VITE_API_BASE_URL` 指向已部署的 API。
@@ -137,9 +143,52 @@ curl -X POST http://127.0.0.1:8000/v1/chat \
 curl -X POST http://127.0.0.1:8000/v1/reviews \
   -H "Content-Type: application/json" \
   -d '{"user_key":"demo-user","period_days":7}'
+
+# Legacy Tool HTTP 工具发现与调用（设置 DEMO_SHARED_PASSWORD 后追加 -u demo:<password>）
+curl http://127.0.0.1:8000/v1/mcp/tools
+
+curl -X POST http://127.0.0.1:8000/v1/mcp/call \
+  -H "Content-Type: application/json" \
+  -d '{"user_key":"demo-user","conversation_id":"<conversation-id>","tool":"search_memory","arguments":{"query":"我的学习目标"}}'
 ```
 
-聊天请求会先在本机脱敏，再写入消息并排队记忆提取任务；前端通过 `POST /v1/chat/stream` 消费 SSE 运行事件，最终事件携带回答和 `redacted` 元数据，可直接用于折叠提示。记忆候选由 Worker 通过结构化输出提取，普通明确信息自动生效，敏感/推断信息进入 `pending`，秘密直接丢弃。
+聊天请求会先在本机脱敏，再写入消息并排队记忆提取任务；前端通过 `POST /v1/chat/stream` 消费 SSE 运行事件，最终事件携带回答和 `redacted` 元数据，可直接用于折叠提示。Legacy 工具调用同样绑定用户和会话，记忆写入工具必须引用当前会话的用户消息，返回结果中的 `run_id` 可用于查看完整审计事件。记忆候选由 Worker 通过结构化输出提取，普通明确信息自动生效，敏感/推断信息进入 `pending`，秘密直接丢弃。
+
+## 统一 Tool、MCP 与 CLI
+
+`/v1/mcp/tools` 与 `/v1/mcp/call` 是兼容的 Tool HTTP API，不能作为标准 MCP Server 配置给客户端。真正的 MCP 能力是应用通过官方 Python SDK 连接配置中的 stdio Server；仅支持 stdio。
+
+工具业务配置在 `[tools]`，远程连接配置在 `[mcp]` 与 `[[mcp.servers]]`。旧 `mcp.allowed_tools`、`mcp.tool_timeout_seconds` 会映射到新配置并发出弃用提示。`tools.enabled=false` 禁用全部工具；`mcp.enabled=false` 只停用远程连接。默认内置工具授予 `memory.read`、`memory.write.propose`；MCP 的 `default_permissions.capabilities` 是应用会话授予集合，`tool_permissions.<远程原名>` 是工具所需权限覆盖，覆盖声明不会自动授予额外权限。
+
+子进程仅继承 SDK 的必要系统变量和 `env_allowlist`，密钥仍由环境变量提供。命令必须逐项出现在 `allowed_commands`。Server 代码在当前用户权限下运行，目录限制由 Server 实现；只配置受信任的 Server。API 单个连接失败时继续提供内置记忆工具，`/v1/mcp/status` 返回连接状态。
+
+每个 `[[mcp.servers]]` 可设置 `allowed_tools = ["get_datetime"]`，按远程原名仅加载选定工具；不设置时加载全部已发现工具，空列表不加载任何工具，未发现的白名单名称会使该 Server 加载失败。权限仍需显式声明。`local-mcp@latest` 当前支持 Windows/macOS，不支持 Linux；应使用本机 API。只测试时间时配置 `allowed_tools = ["get_datetime"]` 与空 `default_permissions.capabilities`，无需授予文件、进程或外部写入能力。
+
+API/Worker 可用 `MEMORY_AGENT_CONFIG` 环境变量覆盖业务配置路径；默认兼容源码仓库和容器中的 `/app/config.toml`。Server 相对路径基于所选配置文件目录。
+
+Windows 本地 API 使用上述 `--loop app.runtime:event_loop`，以满足 psycopg 异步 Checkpoint 的 Selector loop 要求；MCP SDK 会在独立 Proactor loop 中管理 stdio Session，避免阻塞管道拖延超时回收。Linux/容器可继续使用 Uvicorn 默认 loop。
+
+在 `backend` 目录执行，无需模型 Key：
+
+```powershell
+uv run memory-agent tools list
+uv run memory-agent mcp list
+uv run memory-agent mcp status --api-url http://127.0.0.1:8000
+uv run memory-agent --config ../config.toml mcp test filesystem
+# 同样支持 uv run python -m app.cli tools list
+```
+
+`mcp status` 查询运行中 API，HTTP Basic 密码从 `DEMO_SHARED_PASSWORD` 环境变量读取。`mcp test` 可测试配置中禁用的 Server，仅连接、握手、tools/list 并立即回收，不执行工具。显式 `--config` 时相对 Server 参数路径基于配置文件目录；应用默认基于仓库根目录。
+
+复制配置示例后先创建独立的 `demo-workspace` 目录，再启用 filesystem Server。默认只授予读取能力；示例已明确覆盖 `write_file/edit_file/create_directory/move_file` 的写权限要求，因此普通 Agent 请求会拒绝写入。容器镜像默认只有 Python；使用 npx/Node Server 时需要自建含 Node 的镜像并挂载独立演示目录。
+
+官方文件系统互操作演示（仓库根目录，需要 Node/npx，首次会下载固定版本 Server）：
+
+```powershell
+uv run --project backend python scripts/mcp-filesystem-demo.py
+```
+
+脚本只授权新建的临时演示目录，验证读取、显式授予写权限后的写入、拒绝时零远程调用和目录越界业务错误；输出唯一开始/终态审计，并回收 Server 与临时文件。
 
 主回答结束后，前端会继续获取 Worker 写入的记忆提取终态事件，并展示新增记忆、冲突待确认或最终提取失败。运行事件与助手消息持久关联，刷新或切换会话后仍可恢复，重复回放按事件序号去重。
 

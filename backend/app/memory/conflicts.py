@@ -26,7 +26,8 @@ def rank_conflict_candidates(
 ) -> list[ScoredMemory]:
     """Rank possible old versions without deciding whether they conflict."""
 
-    config = (business or get_business_config()).memory
+    resolved_business = business or get_business_config()
+    config = resolved_business.memory
     return rank_memories(
         memories,
         query,
@@ -38,6 +39,8 @@ def rank_conflict_candidates(
         type_weight=config.type_weight,
         recency_half_life_days=config.recency_half_life_days,
         min_relevance_score=config.min_relevance_score,
+        embedding_model_name=resolved_business.models.embedding_model,
+        embedding_dimensions=resolved_business.models.embedding_dimensions,
         limit=limit or config.auto_retrieve_limit,
     )
 

@@ -1,5 +1,6 @@
 import { CalendarRange, RotateCcw, Sparkles } from "lucide-react";
 import type { TimelineItem } from "../api";
+import { MarkdownContent } from "../components/MarkdownContent";
 
 type Props = {
   items: TimelineItem[];
@@ -42,7 +43,7 @@ export function TimelinePage({
         <button className="primary-text-button" disabled={reviewLoading} onClick={onGenerateReview}><Sparkles size={15} />{reviewLoading ? "正在生成" : "生成回顾"}</button>
       </div>
 
-      {review && <section className="review-output"><h2>阶段回顾</h2><div>{review}</div></section>}
+      {review && <section className="review-output"><h2>阶段回顾</h2><MarkdownContent content={review} /></section>}
 
       <div className="timeline-list">
         {loading ? <div className="page-empty">正在加载时间线…</div> : items.length === 0 ? (
