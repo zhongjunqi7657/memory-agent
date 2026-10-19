@@ -5,6 +5,10 @@ from app.persistence import Base
 def test_initial_schema_contract() -> None:
     assert set(Base.metadata.tables) == {
         "users",
+        "projects",
+        "approvals",
+        "managed_worktrees",
+        "task_snapshots",
         "conversations",
         "messages",
         "runs",

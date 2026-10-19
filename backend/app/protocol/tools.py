@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, Protocol
@@ -89,3 +90,8 @@ class ToolExecutionContext:
     granted_permissions: frozenset[str] = field(default_factory=frozenset)
     audit_sink: AuditWriter | None = None
     cancellation: asyncio.Event | None = None
+    project_id: str | None = None
+    execution_directory: str | None = None
+    execution_mode: str = "original"
+    authorize: Callable[..., Awaitable[bool]] | None = None
+    change_journal: Any = None

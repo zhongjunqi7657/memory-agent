@@ -17,6 +17,7 @@ type ConversationSidebarProps = {
   onClose: () => void;
   onNew: () => void;
   onSelect: (id: string) => void;
+  busy: boolean;
   view: "chat" | "memories" | "timeline" | "settings";
   onNavigate: (view: "chat" | "memories" | "timeline" | "settings") => void;
 };
@@ -30,6 +31,7 @@ export function ConversationSidebar({
   onSelect,
   view,
   onNavigate,
+  busy,
 }: ConversationSidebarProps) {
   return (
     <aside className={`sidebar ${open ? "sidebar-open" : ""}`}>
@@ -40,7 +42,7 @@ export function ConversationSidebar({
           <X size={18} />
         </button>
       </div>
-      <button className="new-chat-button" onClick={onNew}>
+      <button className="new-chat-button" disabled={busy} onClick={onNew}>
         <Plus size={17} />
         新建对话
       </button>
@@ -58,6 +60,7 @@ export function ConversationSidebar({
           <button
             className={`conversation-item ${view === "chat" && conversation.id === currentId ? "active" : ""}`}
             key={conversation.id}
+            disabled={busy}
             onClick={() => onSelect(conversation.id)}
           >
             <span className="conversation-title">{conversation.title || "未命名对话"}</span>

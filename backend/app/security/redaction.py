@@ -15,6 +15,11 @@ class RedactionResult:
 
 _SECRET_PATTERNS: tuple[tuple[str, re.Pattern[str], str], ...] = (
     (
+        "structured_credential",
+        re.compile(r'''(?i)(["'](?:password|passwd|token|access_token|refresh_token|api_key|authorization|secret)["']\s*:\s*["'])(?:\\.|[^"'\\])*(["'])'''),
+        r"\1[REDACTED]\2",
+    ),
+    (
         "api_key",
         re.compile(
             r"(?i)(\b[\w-]*(?:api[_ -]?key|access[_ -]?key)\b\s*[:=]\s*)[^\s,;]+"

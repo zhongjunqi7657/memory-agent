@@ -1,15 +1,57 @@
 # 开发状态与后续迭代
 
-更新日期：2026-10-18
+更新日期：2026-10-19
 
-## Delivery notes (2026-10-18)
+## Main integration (2026-10-19)
 
-- Branch: `codex/ordinary-chat-conflicts`.
+- Integrate `codex/ordinary-chat-conflicts` at `b7fe2ff` and `codex/tool-mcp-cli` at `5114813` into `main`, preserving both branch histories.
+- Resolve 21 overlapping files against the newer project-task implementation. Production code, the configuration example and dependency locks match `5114813`; the shared Markdown implementation is retained without duplicating it. Replace a timing-sensitive process-cleanup test with an explicit parent/child handshake.
+- Validate the combined tree in a separate worktree: 246 backend tests and 27 frontend tests passed, with zero skips; Ruff, migration rollback/reapply, production build and npm audit passed. Offline evaluation matched the recorded baseline, including its 4 existing quality failures.
+- This integration does not complete stage 4 manual acceptance or stages 5–7. See the [merge review](main-merge-2026-10-19.md) for scope, evidence and remaining limits.
+
+## Delivery notes (2026-10-18, project-task branch)
+
+- Branch: `codex/tool-mcp-cli`.
+- Move project selection, approvals, command output, change review and optional worktree controls into the conversation workflow; restore pending runs from history.
+- Include selected project identity in model context and apply an independent project tool budget with a final summary when the budget is exhausted.
+- Render new and stored assistant replies and generated reviews as Markdown; keep user input literal and contain wide tables within their own scroll area.
+- Validation: the baseline gate passed with 246 backend tests, 27 frontend tests, Ruff, database migration rollback/reapply and the production build. The offline evaluation matched its recorded baseline, including the 4 existing quality failures.
+
+### Delivery notes (2026-10-18, ordinary-chat branch)
+
+- Branch: `codex/ordinary-chat-conflicts`, delivery commit `b7fe2ff`.
 - Unify tool execution, permissions and audit events; add the MCP stdio client, legacy HTTP compatibility and CLI commands.
 - Render assistant replies and generated reviews with shared Markdown support, including GFM tables and preserved code formatting.
-- Validation: 148 backend tests passed, with the 5 database tests subsequently passed against a separate temporary PostgreSQL instance; 9 frontend tests, Ruff and the production build passed.
+- Historical validation: 148 backend tests passed, followed by the 5 database tests against a separate temporary PostgreSQL instance; 9 frontend tests, Ruff and the production build passed. The combined main-branch validation above supersedes these counts.
 
-## 当前结论
+## 当前开发进度与文档入口
+
+桌面化前阶段 0 至阶段 3 已完成并通过阶段门禁。阶段 4 仍在开发验收中：按用户确认的 Codex 式交互，在对话框左下角选择/添加项目，选文件夹后自动添加并选中；审批、命令输出与折叠 Diff 均放在对应回复中，Worktree 收在高级选项。独立“编码任务”页已移除，完整真实模型与独立演示仓库验收仍待完成。
+
+| 阶段 | 状态 | 交付或下一步 |
+| --- | --- | --- |
+| 0. 可复现基线 | 已验收 | 独立依赖、隔离数据库、完整门禁脚本；见[阶段 0](pre-desktop-stage0-baseline.md) |
+| 1. 项目身份与运行控制 | 已验收 | 项目目录绑定、任务状态、取消/中断、目录互斥；见[阶段 1](pre-desktop-stage1-run-control.md) |
+| 2. 审批与受控执行 | 已验收 | 文件工具、命令审批、Windows 子进程回收、MCP 调用授权；见[阶段 2](pre-desktop-stage2-controlled-execution.md) |
+| 3. Diff、撤销与可选 worktree | 已验收 | 任务基线、归属保护、显式创建、带回及清理；见[阶段 3](pre-desktop-stage3-workspace-changes.md) |
+| 4. Agent 编码闭环与对话界面 | 开发验收中 | 对话框项目菜单、行内审批、折叠 Diff、历史恢复已接入；真实模型项目识别/读取已验证，完整命令与重连演示待验收 |
+| 5. 分层长期记忆 | 待开始 | 个人/项目/临时上下文隔离，worktree 共享项目身份 |
+| 6. MCP 客户端扩展 | 待开始 | Streamable HTTP、resources、prompts、鉴权与连接管理 |
+| 7. 本地交付与整体审计 | 待开始 | 启动与生命周期、本机访问安全、完整演示与最终审计 |
+
+完整范围与各阶段进入条件见[桌面化前实施与验收方案](pre-desktop-implementation-plan.md)；此前 Tool/MCP/CLI 文件级改造见[历史改造验收记录](tool-mcp-implementation.md)。两套文档的阶段编号属于不同实施批次。
+
+最新对话界面、项目识别与工具预算修复回归（2026-10-18）：后端 **246 passed、0 skipped、0 failed**，前端 **20 passed**；Ruff、TypeScript/生产构建及差异检查通过。覆盖自动添加项目、原生窗口取消不添加、选择期间阻止误发送、项目搜索/切换、历史项目及等待审批恢复、停止与提前停止、折叠 Diff 与撤销确认，以及项目上下文传入模型、工具关闭提示。Edge + Qwen 已在独立演示目录实际读取 README，事件确认无命令/写入/删除；API 已重启且数据库/Checkpoint 正常。原生窗口人工选择与完整命令失败修复/重连演示尚待验证。此前阶段 4 回归为后端 227 项、前端 8 项，迁移回退/重升和离线评测基线一致性通过；本次未修改迁移和记忆评测链路。阶段 3 二次验收的独立基线为后端 226 项、前端 6 项，证据目录为 `.runtime/baseline/db7ba532d3ae40ebadfc9920cb428c06/`，完整复现命令为 `./scripts/verify-baseline.ps1`。
+
+“选择项目后模型仍问是哪一个项目”已修复：原先绑定仅存在执行上下文，没有进入模型提示，开发配置又默认关闭本地工具。现请求级注入项目身份/执行目录与有效工具状态，前端在本地或全局工具关闭时明确提示。当前 worktree 使用自身不纳入 Git 的 `config.toml` 启用本地工具，默认示例与原目录配置不变。旧回复和缺失快照保留历史状态，重新发送即可使用修复后的能力；详情及真实读取证据见[阶段 4 记录](pre-desktop-stage4-agent-task-ui.md)。
+
+项目审计只读 4 轮就终止的问题已修复：普通聊天默认 4 轮，项目任务独立默认 24 轮；触顶后停止新工具并根据已有证据生成阶段性报告，明确未检查范围。新增超过 4 轮读取、低预算/零预算与待调用不执行回归。重启后 Edge + Qwen 在用户已绑定项目实际执行 7 轮只读调用并生成阶段性报告，Run 完成、Diff 为空，无命令或文件改动；本次未触及 24 轮上限，触顶总结已有确定性回归。证据见[阶段 4 记录](pre-desktop-stage4-agent-task-ui.md)。
+
+仍有 4 条既有记忆质量失败；当前不具备操作系统沙箱，也尚未完成阶段 7 的本机访问安全与整体发布审计。阶段 3 提交 `6a48328` 与阶段 4 提交 `6583720` 已推送到远端 `codex/tool-mcp-cli`；阶段 0/1/2 已通过 `4db3e1e` 交付远端。本次对话界面与 Markdown 改动的交付范围及验证结果见上方英文交付备注。
+
+阶段 4 的实现与自动化门禁见[阶段 4 验收记录](pre-desktop-stage4-agent-task-ui.md)。阶段 4当前仍保留手工浏览器演示、真实界面重连恢复和独立演示仓库命令验收项，不能据自动化测试通过宣称桌面化前全部发布验收完成。
+
+## 历史完成记录
 
 - 步骤 1“异步记忆事件展示”已经验收，并通过 GitHub PR #1 合并到 `main`。
 - 步骤 2“完善普通聊天冲突治理”已通过真实 PostgreSQL 验收。
@@ -17,8 +59,13 @@
 - 步骤 3“完善 Embedding 与上下文可靠性”已于 2026-09-11 验收通过；本轮没有混入 MCP 或多 Agent 改动。
 - 步骤 4“完成首版验收”已于 2026-09-11 通过完整 7 项复验；步骤 5 MCP 工具调用首轮传输闭环已于 2026-09-12 完成。
 - 2026-10-09 文件级改造已完成六阶段门禁：统一 Tool 执行核心、官方 MCP stdio Client、legacy HTTP 兼容迁移与最小 CLI；最终 Windows/Linux 后端各 150 项通过，整体审计及部署限制见 [改造验收记录](tool-mcp-implementation.md)。
+- 2026-10-11 用户已确认[桌面化前实施方案](pre-desktop-implementation-plan.md)。阶段 0 已通过当前 worktree 的完整门禁：后端 153 passed、无跳过，前端 4 passed、构建通过，离线评测保持既有 4 条质量失败；复现流程与证据见[阶段 0 验收记录](pre-desktop-stage0-baseline.md)。下一步是项目/任务身份与运行控制；下表中的多 Agent 路线保留为历史后续规划，不纳入本轮。
+- 2026-10-17 桌面化前阶段 1 已完成：项目与会话绑定、Run 目录快照、运行中事件、取消/中断、目录互斥及单实例恢复保护。后端 164 passed、无跳过，前端 6 passed、构建通过；迁移升级/回退/重升通过，离线评测不变。交付说明见[阶段 1 验收记录](pre-desktop-stage1-run-control.md)，下一步为阶段 2 审批与受控文件/命令执行。
+- 2026-10-17 桌面化前阶段 2 已完成：调用快照审批、精确会话批准与撤销、本地文本文件工具、Windows 原生命令/进程树回收及 MCP 独立调用授权。修复了内部 UUID 被误判为银行卡号而偶发拒绝合法审批的问题。后端 198 passed、无跳过，前端 6 passed、构建、迁移往返及离线基线一致性通过；本地执行默认关闭，当前通过 API 验收，正式界面在阶段 4。交付说明见[阶段 2 验收记录](pre-desktop-stage2-controlled-execution.md)，下一步为阶段 3 任务 Diff、撤销与可选 worktree。
 
-## 迭代状态
+## 历史迭代路线（非本轮执行顺序）
+
+以下保留首版迭代与多 Agent 路线的历史记录；当前开发顺序以上方桌面化前阶段表为准，多 Agent 不纳入本轮范围。历史记录中的“下一步”指当时计划。
 
 | 步骤 | 状态 | 当前交付或进入条件 |
 | --- | --- | --- |

@@ -5,6 +5,7 @@ from __future__ import annotations
 from uuid import UUID
 
 from sqlalchemy import func, select, update
+from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -40,10 +41,9 @@ class ConversationRepository:
         )
         if user:
             return user
-        user = User(external_key=external_key)
-        self.session.add(user)
-        await self.session.flush()
-        return user
+        await self.session.execute(insert(User).values(external_key=external_key)
+                                   .on_conflict_do_nothing(index_elements=[User.external_key]))
+        return await self.get_user(external_key)
 
     async def get_user(self, external_key: str) -> User | None:
         return await self.session.scalar(
@@ -150,10 +150,10 @@ class ConversationRepository:
         await self.session.flush()
         return message
 
-    async def create_run(self, conversation_id: UUID) -> Run:
+    async def create_run(self, conversation_id: UUID, **binding) -> Run:
         from datetime import datetime, timezone
 
-        run = Run(conversation_id=conversation_id, status=RunStatus.RUNNING)
+        run = Run(conversation_id=conversation_id, status=RunStatus.RUNNING, **binding)
         run.started_at = datetime.now(timezone.utc)
         self.session.add(run)
         await self.session.flush()

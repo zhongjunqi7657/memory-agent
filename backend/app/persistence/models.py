@@ -49,6 +49,9 @@ class RunStatus(str, enum.Enum):
     RUNNING = "running"
     COMPLETED = "completed"
     FAILED = "failed"
+    WAITING_APPROVAL = "waiting_approval"
+    CANCELLED = "cancelled"
+    INTERRUPTED = "interrupted"
 
 
 class MemoryKind(str, enum.Enum):
@@ -97,6 +100,7 @@ class Conversation(TimestampMixin, Base):
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     title: Mapped[str | None] = mapped_column(String(200))
+    project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id"))
     summary: Mapped[str | None] = mapped_column(Text)
     summary_through_sequence: Mapped[int] = mapped_column(
         Integer, default=0, nullable=False
@@ -165,6 +169,10 @@ class Run(TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     error_message: Mapped[str | None] = mapped_column(Text)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id"))
+    execution_mode: Mapped[str] = mapped_column(String(20), default="original", server_default="original", nullable=False)
+    execution_directory: Mapped[str | None] = mapped_column(Text)
+    worktree_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("managed_worktrees.id"))
 
     conversation: Mapped[Conversation] = relationship(back_populates="runs")
     events: Mapped[list[RunEvent]] = relationship(

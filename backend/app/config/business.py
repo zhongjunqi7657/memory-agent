@@ -11,6 +11,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.config.local import LocalExecutionConfig
 from app.mcp.config import MCPConfig
 
 if sys.version_info >= (3, 11):
@@ -44,6 +45,7 @@ class MemoryConfig(BaseModel):
 class AgentConfig(BaseModel):
     recent_turns: int = Field(default=8, ge=1, le=50)
     max_tool_rounds: int = Field(default=4, ge=0, le=10)
+    project_max_tool_rounds: int = Field(default=24, ge=0, le=100)
     context_token_budget: int = Field(default=6000, ge=500, le=100000)
     context_system_reserve_tokens: int = Field(default=200, ge=0, le=10000)
     summary_trigger_tokens: int = Field(default=4800, ge=200, le=100000)
@@ -82,6 +84,7 @@ class BusinessConfig(BaseModel):
     security: SecurityConfig = SecurityConfig()
     tools: ToolConfig = ToolConfig()
     mcp: MCPConfig = MCPConfig()
+    local: LocalExecutionConfig = LocalExecutionConfig()
 
     @model_validator(mode="before")
     @classmethod

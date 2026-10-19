@@ -42,12 +42,16 @@ export interface PublicConfig {
   agent: {
     context_token_budget: number;
     max_tool_rounds: number;
+    project_max_tool_rounds: number;
   };
   checkpoint: { ready: boolean; error: string | null };
+  local: { enabled: boolean };
+  tools: { enabled: boolean };
 }
 
 export interface ConversationSummary {
   id: string;
+  project_id?: string | null;
   title: string | null;
   created_at: string;
   updated_at: string;
@@ -91,7 +95,7 @@ function getAuthHeader(): string | null {
   return sessionStorage.getItem(authStorageKey);
 }
 
-async function requestWithDemoAuth(
+export async function requestWithDemoAuth(
   input: RequestInfo | URL,
   init: RequestInit = {},
 ): Promise<Response> {
@@ -118,7 +122,7 @@ async function requestWithDemoAuth(
   return response;
 }
 
-async function parseResponse<T>(response: Response): Promise<T> {
+export async function parseResponse<T>(response: Response): Promise<T> {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as { detail?: string } | null;
     throw new Error(body?.detail ?? "请求失败，请稍后重试");
@@ -140,6 +144,10 @@ function completedResponse(event: RunEvent): ChatResponse | null {
   return event.event_type === "run.completed"
     ? (event.payload as unknown as ChatResponse)
     : null;
+}
+
+function failedRun(event: RunEvent): boolean {
+  return ["error", "run.failed", "run.cancelled", "run.interrupted"].includes(event.event_type);
 }
 
 export async function fetchRunEvents(
@@ -172,7 +180,7 @@ async function recoverRun(
     for (const event of events) {
       sequence = Math.max(sequence, event.sequence ?? sequence);
       onEvent?.(event);
-      if (event.event_type === "run.failed") {
+      if (failedRun(event)) {
         throw new Error(String(event.payload.message ?? "请求处理失败"));
       }
       const completed = completedResponse(event);
@@ -198,11 +206,19 @@ export async function streamChat(
   conversationId: string | null,
   onEvent?: (event: RunEvent) => void,
   signal?: AbortSignal,
+  task?: TaskExecutionConfig,
 ): Promise<ChatResponse> {
   const response = await requestWithDemoAuth(`${apiBase}/v1/chat/stream`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_key: userKey, content, conversation_id: conversationId }),
+    body: JSON.stringify({
+      user_key: userKey,
+      content,
+      conversation_id: conversationId,
+      project_id: task?.projectId ?? null,
+      execution_mode: task?.executionMode ?? "original",
+      worktree_id: task?.worktreeId ?? null,
+    }),
     signal,
   });
   if (!response.ok || !response.body) return parseResponse<ChatResponse>(response);
@@ -225,7 +241,7 @@ export async function streamChat(
         runId = event.run_id ?? runId;
         lastSequence = Math.max(lastSequence, event.sequence ?? lastSequence);
         onEvent?.(event);
-        if (event.event_type === "error" || event.event_type === "run.failed") {
+        if (failedRun(event)) {
           terminalError = new Error(String(event.payload.message ?? "请求处理失败"));
           throw terminalError;
         }
@@ -242,6 +258,20 @@ export async function streamChat(
   if (completed) return completed;
   if (runId) return recoverRun(runId, lastSequence, onEvent, signal);
   throw new Error("流式响应未正常开始");
+}
+
+export type TaskExecutionConfig = {
+  projectId: string | null;
+  executionMode: "original" | "worktree";
+  worktreeId: string | null;
+};
+
+export async function cancelRun(runId: string) {
+  const response = await requestWithDemoAuth(
+    `${apiBase}/v1/runs/${encodeURIComponent(runId)}/cancel?user_key=${userKey}`,
+    { method: "POST" },
+  );
+  return parseResponse<{ run_id: string; status: string; cancellation_requested: boolean }>(response);
 }
 
 export async function fetchConversations(): Promise<ConversationSummary[]> {

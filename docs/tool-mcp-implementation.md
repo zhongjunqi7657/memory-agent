@@ -2,6 +2,8 @@
 
 依据：桌面《Memory-Agent-Tool-MCP-CLI-文件级改造方案.md》。按六个阶段执行回归门禁。
 
+本文件保留 2026-10-09 Tool/MCP/CLI 改造的历史验收结果，其阶段编号与后续桌面化前方案不同。截至 2026-10-19，后续方案已完成阶段 0 至阶段 3，两个开发分支已纳入本次主分支合并；最新进度见[开发状态](development-status.md)，合并证据见[主分支检查记录](main-merge-2026-10-19.md)，后续实施范围见[桌面化前方案](pre-desktop-implementation-plan.md)。
+
 ## 基线
 
 - 后端 97 passed、4 skipped；前端 4 passed；Ruff 通过。
@@ -142,4 +144,4 @@ Linux 最终测试镜像为 `memory-agent-mcp-audit-api:latest`，构建标识 `
 - 本次 Docker 审计 API、测试容器与临时 PostgreSQL 容器均已回收；临时测试库及其匿名卷已删除，测试数据未备份、不可恢复。
 - 未对用户原有 `memory-agent-demo` 的 API、Worker、PostgreSQL 容器执行停止、重建或数据清理；Docker 引擎保持运行。
 - 保留最新 `memory-agent-mcp-audit-api:latest` 镜像，便于复现；本次 `.runtime` 审计配置、日志和 PID 记录保留在忽略目录中，它们不是生产配置，用户既有运行文件未清理。
-- Delivery update (2026-10-18): the implementation and Markdown rendering changes are included in the delivery commit on `codex/ordinary-chat-conflicts`; existing local work is preserved without resets or whole-file replacements.
+- Delivery update: the Tool/MCP/CLI implementation and Markdown changes were pushed on 2026-10-18 in `b7fe2ff` and `5114813`. Both branch tips are included in the 2026-10-19 main integration; historical test counts above are not the current combined baseline.

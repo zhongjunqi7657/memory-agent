@@ -3,7 +3,7 @@ from typing import ClassVar
 
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeChatModel
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -17,6 +17,9 @@ from app.tools.registry import ToolRegistry
 
 
 class FixedChatModel(FakeChatModel):
+    async def _agenerate(self, messages, **kwargs):
+        return self._generate(messages, **kwargs)
+
     def _generate(self, messages, stop=None, run_manager=None, **kwargs):
         return ChatResult(
             generations=[
@@ -158,8 +161,50 @@ async def test_graph_stops_after_configured_tool_round_limit() -> None:
         }
     )
 
-    assert ToolLoopModel.call_count == 2
+    assert ToolLoopModel.call_count == 3
     assert "达到本轮上限" in result["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_tool_limit_summarizes_completed_results_without_executing_pending_calls():
+    executed = []
+
+    async def record_lookup(arguments):
+        executed.append(arguments)
+        return ToolResult.success("verified module evidence")
+
+    class LimitSummaryModel(ToolLoopModel):
+        async def _agenerate(self, messages, **kwargs):
+            if messages[-1].type == "system":
+                assert any(isinstance(item, ToolMessage) and "verified module evidence" in item.content for item in messages)
+                assert messages[-2].status == "error"  # The extra requested call did not execute.
+                return ChatResult(generations=[ChatGeneration(message=AIMessage(content="已检查模块存在验证证据；其他模块尚未检查。"))])
+            return await super()._agenerate(messages, **kwargs)
+
+    ToolLoopModel.call_count = 0
+    registry = ToolRegistry([MemoryTool("builtin.test.lookup", "lookup", "Read test evidence",
+                                       {"type": "object"}, frozenset(), 1, record_lookup)])
+    graph = build_graph(LimitSummaryModel(always_call_tool=True), tools=registry.function_schemas(),
+                        tool_executor=ToolExecutor(registry), tool_context=ToolExecutionContext("run", "agent"),
+                        max_tool_rounds=1)
+    result = await graph.ainvoke({"messages": [HumanMessage(content="审计项目")], "current_input": "审计项目"})
+    assert len(executed) == 1
+    assert "验证证据" in result["messages"][-1].content
+    assert "尚未检查" in result["messages"][-1].content
+
+
+@pytest.mark.asyncio
+async def test_zero_tool_budget_does_not_execute_tools(monkeypatch):
+    async def forbidden_lookup(arguments):
+        pytest.fail("No tool may execute with a zero budget")
+
+    monkeypatch.setattr("tests.test_config_and_graph.lookup", forbidden_lookup)
+    ToolLoopModel.call_count = 0
+    result = await tool_graph(ToolLoopModel(always_call_tool=True), max_tool_rounds=0).ainvoke({
+        "messages": [HumanMessage(content="不要执行工具")], "current_input": "不要执行工具",
+    })
+    assert not result["messages"][-1].tool_calls
+    assert "0" in result["messages"][-1].content
 
 
 def test_explicit_memory_command_bypasses_normal_model_path() -> None:

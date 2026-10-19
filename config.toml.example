@@ -23,6 +23,7 @@ pending_confidence_threshold = 0.5
 [agent]
 recent_turns = 8
 max_tool_rounds = 4
+project_max_tool_rounds = 24
 context_token_budget = 6000
 context_system_reserve_tokens = 200
 summary_trigger_tokens = 4800
@@ -39,6 +40,19 @@ daily_token_budget = 20000
 enabled = true
 allowed_builtin_tools = ["builtin.memory.search", "builtin.memory.timeline", "builtin.memory.propose_update"]
 default_timeout_seconds = 8.0
+
+# Enable only for trusted local development; directory binding is required.
+# Commands still require explicit interactive approval. This is not an OS sandbox.
+[local]
+enabled = false
+max_file_bytes = 1048576
+max_entries = 200
+max_search_files = 1000
+max_snapshot_bytes = 16777216
+max_diff_bytes = 65536
+max_output_bytes = 65536
+command_timeout_seconds = 60.0
+approval_timeout_seconds = 120.0
 
 [mcp]
 enabled = true

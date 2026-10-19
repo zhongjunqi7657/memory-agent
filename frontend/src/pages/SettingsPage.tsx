@@ -25,8 +25,8 @@ export function SettingsPage({ config, loading, onRefresh }: Props) {
       {loading ? <div className="page-empty">正在读取配置…</div> : config && (
         <div className="settings-groups">
           <section><h2>模型</h2><dl><div><dt>对话模型</dt><dd>{config.models.chat}</dd></div><div><dt>Embedding</dt><dd>{config.models.embedding} · {config.models.embedding_dimensions} 维</dd></div><div><dt>服务连接</dt><dd>{config.provider_configured ? "已配置" : "未配置"}</dd></div></dl></section>
-          <section><h2>记忆与上下文</h2><dl><div><dt>自动召回</dt><dd>{config.memory.auto_retrieve_limit} 条</dd></div><div><dt>上下文预算</dt><dd>{config.agent.context_token_budget.toLocaleString()} tokens</dd></div><div><dt>工具循环上限</dt><dd>{config.agent.max_tool_rounds} 轮</dd></div></dl></section>
-          <section><h2>运行状态</h2><dl><div><dt>环境</dt><dd>{config.environment}</dd></div><div><dt>Checkpoint</dt><dd>{config.checkpoint.ready ? "已连接 PostgreSQL" : `不可用（${config.checkpoint.error ?? "未知"}）`}</dd></div></dl></section>
+          <section><h2>记忆与上下文</h2><dl><div><dt>自动召回</dt><dd>{config.memory.auto_retrieve_limit} 条</dd></div><div><dt>上下文预算</dt><dd>{config.agent.context_token_budget.toLocaleString()} tokens</dd></div><div><dt>普通聊天工具上限</dt><dd>{config.agent.max_tool_rounds} 轮</dd></div><div><dt>项目任务工具上限</dt><dd>{config.agent.project_max_tool_rounds} 轮</dd></div></dl></section>
+          <section><h2>运行状态</h2><dl><div><dt>环境</dt><dd>{config.environment}</dd></div><div><dt>项目文件访问</dt><dd>{config.local.enabled && config.tools.enabled ? "已启用" : "未启用"}</dd></div><div><dt>Checkpoint</dt><dd>{config.checkpoint.ready ? "已连接 PostgreSQL" : `不可用（${config.checkpoint.error ?? "未知"}）`}</dd></div></dl></section>
           <section><h2>召回权重</h2><dl>{Object.entries(config.memory.weights).map(([name, value]) => <div key={name}><dt>{weightLabels[name] ?? name}</dt><dd>{Math.round(value * 100)}%</dd></div>)}</dl></section>
         </div>
       )}

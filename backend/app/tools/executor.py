@@ -6,6 +6,8 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Mapping
+from copy import deepcopy
+from dataclasses import replace
 from typing import Any
 
 from jsonschema.validators import validator_for
@@ -21,6 +23,7 @@ from app.protocol.tools import (
     ToolStatus,
 )
 from app.tools.base import Tool
+from app.tools.local.files import LocalFileError
 from app.tools.registry import ToolRegistry
 
 
@@ -38,6 +41,7 @@ class ToolExecutor:
     async def execute(
         self, call: ToolCall, context: ToolExecutionContext
     ) -> ToolResult:
+        call = replace(call, arguments=deepcopy(call.arguments))
         tool = self._registry.get(call.tool_name)
         started = time.perf_counter()
         result = self._prepare(call, tool, context)
@@ -49,7 +53,18 @@ class ToolExecutor:
         try:
             if result is None:
                 assert tool is not None
-                result = await self._run_tool(tool, call.arguments, context)
+                if hasattr(tool, "prepare"):
+                    call = replace(call, arguments=await tool.prepare(call.arguments, context))
+                needs_approval = bool(getattr(tool, "approval_required", False) or (tool.remote_name and context.authorize))
+                allowed = not needs_approval or await self._authorize(tool, call, context)
+                if context.cancellation and context.cancellation.is_set():
+                    result = self._cancelled_result()
+                elif not allowed or not self._registry.is_enabled(tool):
+                    result = ToolResult(status=ToolStatus.DENIED, error=ToolError("approval_denied", ToolErrorCategory.PERMISSION, "工具调用未获批准或权限已失效"))
+                else:
+                    if context.change_journal and (tool.remote_name or tool.id == "builtin.local.command"):
+                        await context.change_journal.external_started()
+                    result = await self._run_tool(tool, call.arguments, context)
                 if not isinstance(result, ToolResult) or not isinstance(result.status, ToolStatus) or (
                     result.status is ToolStatus.SUCCESS and result.error is not None
                 ) or (result.status is not ToolStatus.SUCCESS and result.error is None):
@@ -61,6 +76,9 @@ class ToolExecutor:
                 self._duration_ms(started),
             )
             raise
+        except (LocalFileError, OSError, UnicodeError) as error:
+            result = ToolResult.failure(code="local_operation_rejected", category=ToolErrorCategory.PERMISSION,
+                                        message=str(error) if isinstance(error, LocalFileError) else "本地文件或进程操作失败")
         except Exception:  # noqa: BLE001 - provider details must be normalized
             result = ToolResult.failure(
                 code="internal_error", category=ToolErrorCategory.INTERNAL,
@@ -73,6 +91,25 @@ class ToolExecutor:
             event_type, call, tool, context, result, self._duration_ms(started)
         )
         return result
+
+    @staticmethod
+    async def _authorize(tool, call, context) -> bool:
+        if context.authorize is None or (context.cancellation and context.cancellation.is_set()):
+            return False
+        if context.cancellation is None:
+            return await context.authorize(tool, call, context)
+        authorization = asyncio.create_task(context.authorize(tool, call, context))
+        cancellation = asyncio.create_task(context.cancellation.wait())
+        try:
+            done, _ = await asyncio.wait({authorization, cancellation}, return_when=asyncio.FIRST_COMPLETED)
+            return await authorization if cancellation not in done else False
+        finally:
+            for task in (authorization, cancellation):
+                if not task.done():
+                    task.cancel()
+            for task in (authorization, cancellation):
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     def _prepare(
         self, call: ToolCall, tool: Tool | None, context: ToolExecutionContext
@@ -102,7 +139,9 @@ class ToolExecutor:
 
         try:
             decision = self._permission_policy.decide(
-                tool.required_permissions, context.granted_permissions
+                tool.required_permissions, context.granted_permissions | (
+                    tool.required_permissions if tool.remote_name and context.authorize else frozenset()
+                )
             )
         except Exception:  # noqa: BLE001 - policy failures must fail closed
             decision = None
@@ -210,6 +249,9 @@ class ToolExecutor:
         }
         if duration_ms is not None:
             payload["duration_ms"] = duration_ms
+        if tool and tool.id == "builtin.local.command" and result and isinstance(result.content, dict):
+            # The native process layer has already bounded and redacted this data.
+            payload["command_result"] = result.content
         return payload
 
     @staticmethod

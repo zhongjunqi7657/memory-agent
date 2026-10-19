@@ -20,6 +20,8 @@ def tool_message(call_id: str, name: str, result: ToolResult) -> ToolMessage:
                 "retryable": result.error.retryable,
             } if result.error else {"code": "internal_error", "message": "工具执行失败"},
         }
+        if result.content is not None:
+            content["content"] = result.content
     else:
         content = result.content
     if "structured_content" in result.metadata:

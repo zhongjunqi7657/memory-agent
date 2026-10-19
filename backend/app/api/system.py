@@ -62,6 +62,7 @@ async def public_config() -> dict[str, object]:
         "agent": {
             "context_token_budget": business.agent.context_token_budget,
             "max_tool_rounds": business.agent.max_tool_rounds,
+            "project_max_tool_rounds": business.agent.project_max_tool_rounds,
         },
         "mcp": {
             "enabled": business.mcp.enabled,
@@ -72,5 +73,6 @@ async def public_config() -> dict[str, object]:
             "allowed_builtin_tools": business.tools.allowed_builtin_tools,
             "default_timeout_seconds": business.tools.default_timeout_seconds,
         },
+        "local": {"enabled": business.local.enabled},
         "checkpoint": checkpoint_status(),
     }

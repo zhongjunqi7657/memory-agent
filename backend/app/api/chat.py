@@ -3,7 +3,7 @@
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from typing import Annotated
+from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -12,6 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from starlette.responses import StreamingResponse
 
 from app.agent.service import AgentInputError, AgentService
+from app.api.approvals import approval_broker
+from app.api.execution import run_controller
 from app.config.business import get_business_config
 from app.persistence.db import get_session, get_session_factory
 from app.security.auth import require_demo_auth
@@ -27,6 +29,9 @@ class ChatRequest(BaseModel):
     user_key: str = Field(default="demo-user", min_length=1, max_length=128)
     content: str = Field(min_length=1)
     conversation_id: UUID | None = None
+    project_id: UUID | None = None
+    execution_mode: Literal["original", "worktree"] = "original"
+    worktree_id: UUID | None = None
 
 
 class ChatResponse(BaseModel):
@@ -56,11 +61,14 @@ async def chat(
         request.user_key, request.content, get_business_config().security
     )
     try:
-        result = await AgentService(session, mcp_manager=getattr(http_request.app.state, "mcp_manager", None) if http_request else None).chat(
+        result = await AgentService(session, controller=run_controller(http_request), broker=approval_broker(http_request), mcp_manager=getattr(http_request.app.state, "mcp_manager", None) if http_request else None).chat(
             user_key=request.user_key,
             content=request.content,
             conversation_id=request.conversation_id,
+            project_id=request.project_id, execution_mode=request.execution_mode, worktree_id=request.worktree_id,
         )
+    except asyncio.CancelledError as error:
+        raise HTTPException(status_code=409, detail="任务已取消") from error
     except AgentInputError as error:
         raise HTTPException(status_code=400, detail=str(error)) from error
     return ChatResponse.model_validate(result)
@@ -79,41 +87,55 @@ async def chat_stream(
     )
     async def event_generator() -> AsyncIterator[str]:
         queue: asyncio.Queue[dict[str, object] | None] = asyncio.Queue()
+        connected = True
 
         async def publish(event: dict[str, object]) -> None:
-            await queue.put(event)
+            if connected:
+                queue.put_nowait(event)
 
         async def run_agent() -> None:
             try:
                 async with session_factory() as session:
-                    await AgentService(session, mcp_manager=getattr(http_request.app.state, "mcp_manager", None) if http_request else None).chat(
+                    await AgentService(session, controller=run_controller(http_request), broker=approval_broker(http_request), mcp_manager=getattr(http_request.app.state, "mcp_manager", None) if http_request else None).chat(
                         user_key=request.user_key,
                         content=request.content,
                         conversation_id=request.conversation_id,
+                        project_id=request.project_id, execution_mode=request.execution_mode, worktree_id=request.worktree_id,
                         event_sink=publish,
                     )
+            except asyncio.CancelledError:
+                pass  # The lifecycle has persisted and published run.cancelled.
+            except AgentInputError as error:
+                await publish({"event_type": "error", "payload": {"message": str(error)}})
             except Exception:  # noqa: BLE001 - never expose provider details
-                await queue.put(
+                await publish(
                     {"event_type": "error", "payload": {"message": "请求处理失败"}}
                 )
             finally:
-                await queue.put(None)
+                if connected:
+                    queue.put_nowait(None)
 
         task = asyncio.create_task(run_agent())
         _running_stream_tasks.add(task)
         task.add_done_callback(_running_stream_tasks.discard)
         # The task is intentionally independent from this response iterator. A
         # disconnected client can replay its persisted events without a second run.
-        while True:
-            try:
-                event = await asyncio.wait_for(queue.get(), timeout=15)
-            except asyncio.TimeoutError:
-                yield ": keep-alive\n\n"
-                continue
-            if event is None:
-                break
-            yield format_sse(event)
-        await task
+        try:
+            while True:
+                try:
+                    event = await asyncio.wait_for(queue.get(), timeout=15)
+                except asyncio.TimeoutError:
+                    yield ": keep-alive\n\n"
+                    continue
+                if event is None:
+                    break
+                yield format_sse(event)
+            await task
+        finally:
+            connected = False
+            # Disconnection stops buffering, not the independent task.
+            while not queue.empty():
+                queue.get_nowait()
 
     return StreamingResponse(
         event_generator(),

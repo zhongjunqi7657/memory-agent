@@ -9,8 +9,12 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.api.approvals import approval_broker
+from app.api.execution import run_controller
 from app.audit.sink import CallbackAuditSink
 from app.config.business import get_business_config
+from app.execution.controller import RunConflict
+from app.execution.remote_call import remote_call
 from app.mcp.transport import (
     MCPCallRequest,
     MCPCallResponse,
@@ -26,6 +30,7 @@ from app.security.auth import require_demo_auth
 from app.tools.builtin.memory import LEGACY_TOOL_IDS
 from app.tools.executor import ToolExecutor
 from app.tools.request import request_permissions
+from app.workspace.paths import DirectoryError
 
 router = APIRouter(
     prefix="/v1/mcp",
@@ -80,6 +85,13 @@ async def call_tool(
         )
         if source_message is None or source_message.role is not MessageRole.USER:
             raise HTTPException(status_code=400, detail="来源消息不存在或不可用")
+
+    if tool_id.startswith(("mcp.", "mcp__")):
+        try:
+            return await remote_call(request, session, user, conversation, get_business_config(), manager,
+                                     run_controller(http_request), approval_broker(http_request))
+        except (RunConflict, DirectoryError) as error:
+            raise HTTPException(status_code=409, detail=str(error)) from error
 
     run = await repository.create_run(conversation.id)
     event_sequence = 0
