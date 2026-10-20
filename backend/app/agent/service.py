@@ -213,7 +213,7 @@ class AgentService:
         command = parse_memory_command(redaction.text)
         if command:
             try:
-                memory_service = MemoryService(self.session, business=self.business)
+                memory_service = MemoryService(self.session, business=self.business, project_id=project_id)
                 response_memory_count = 0
                 if command.type is MemoryCommandType.SAVE:
                     if redaction.redacted:
@@ -322,7 +322,7 @@ class AgentService:
                     source="automatic_retrieval",
                 ),
             )
-        scored_memories = await MemoryRepository(self.session).search_hybrid(
+        scored_memories = await MemoryRepository(self.session, project_id=project_id, include_personal=True).search_hybrid(
             user.id,
             redaction.text,
             query_embedding=query_embedding,
@@ -351,14 +351,14 @@ class AgentService:
             ),
         )
         for item in scored_memories:
-            item_tokens = estimate_tokens(item.memory.content) + 4
+            item_tokens = estimate_tokens(f"[{'项目' if item.memory.project_id else '个人'}] {item.memory.content}") + 4
             if injected_tokens + item_tokens > injection_budget:
                 continue
             injected.append(item)
             injected_tokens += item_tokens
         scored_memories = injected
         memories = [item.memory for item in scored_memories]
-        memory_context = "\n".join(f"- {memory.content}" for memory in memories)
+        memory_context = "\n".join(f"- [{'项目' if memory.project_id else '个人'}] {memory.content}" for memory in memories)
         await emit(
             "memory.retrieved",
             {
@@ -366,6 +366,7 @@ class AgentService:
                 "memories": [
                     {
                         "id": str(item.memory.id),
+                        "project_id": str(item.memory.project_id) if item.memory.project_id else None,
                         "content": item.memory.content,
                         "kind": item.memory.kind.value,
                         "score": round(item.score, 4),
@@ -420,6 +421,7 @@ class AgentService:
                 emit=emit,
                 manager=self.mcp_manager,
                 execution_directory=directory,
+                project_id=project_id,
             )
             async def authorize(tool, call, execution):
                 return await self.broker.authorize(tool, call, execution, lifecycle, self.business.local.approval_timeout_seconds)
@@ -456,6 +458,7 @@ class AgentService:
                     "current_input": redaction.text,
                     "conversation_summary": context.summary,
                     "memory_context": memory_context,
+                    "retrieved_memories": [],
                     "tool_rounds": 0,
                     "tool_limit_reached": False,
                 },
@@ -469,7 +472,7 @@ class AgentService:
             answer = result["messages"][-1].text
             await emit("model.completed", {"answer_length": len(answer)})
             return await finish_success(
-                answer, memory_count=len(memories), queue_extraction=True
+                answer, memory_count=len(memories), queue_extraction=project_id is None
             )
         except Exception as error:
             await finish_failure(error)

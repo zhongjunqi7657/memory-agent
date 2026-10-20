@@ -1,8 +1,10 @@
+import type { ReactNode } from "react";
 import { CalendarRange, RotateCcw, Sparkles } from "lucide-react";
 import type { TimelineItem } from "../api";
 import { MarkdownContent } from "../components/MarkdownContent";
 
 type Props = {
+  scopeControl?: ReactNode;
   items: TimelineItem[];
   loading: boolean;
   review: string | null;
@@ -20,6 +22,7 @@ function formatDate(value: string | null) {
 }
 
 export function TimelinePage({
+  scopeControl,
   items,
   loading,
   review,
@@ -36,6 +39,7 @@ export function TimelinePage({
         <button className="secondary-button" onClick={onRefresh}><RotateCcw size={15} />刷新</button>
       </header>
 
+      {scopeControl}
       <div className="review-toolbar">
         <div className="segmented-control" aria-label="回顾周期">
           {[7, 30, 90].map((days) => <button key={days} className={periodDays === days ? "selected" : ""} onClick={() => onPeriodChange(days)}>最近 {days} 天</button>)}

@@ -3,6 +3,7 @@ export type MemoryKind = "semantic" | "episodic";
 
 export interface Memory {
   id: string;
+  project_id?: string | null;
   kind: MemoryKind;
   status: MemoryStatus;
   sensitivity: "normal" | "sensitive" | "secret";
@@ -18,6 +19,7 @@ export interface Memory {
 
 export interface TimelineItem {
   id: string;
+  project_id?: string | null;
   content: string;
   kind: MemoryKind;
   status: MemoryStatus;
@@ -288,8 +290,12 @@ export async function fetchConversationMessages(
   return parseResponse<StoredMessage[]>(response);
 }
 
-export async function fetchMemories(): Promise<Memory[]> {
-  const response = await requestWithDemoAuth(`${apiBase}/v1/memories?user_key=${userKey}&limit=50`);
+function memoryScopeQuery(projectId: string | null) {
+  return projectId ? `&project_id=${encodeURIComponent(projectId)}` : "";
+}
+
+export async function fetchMemories(projectId: string | null = null, includePersonal = false): Promise<Memory[]> {
+  const response = await requestWithDemoAuth(`${apiBase}/v1/memories?user_key=${userKey}&limit=50${memoryScopeQuery(projectId)}&include_personal=${includePersonal}`);
   return parseResponse<Memory[]>(response);
 }
 
@@ -299,9 +305,9 @@ export type MemoryUpdate = {
   importance?: number;
 };
 
-export async function updateMemory(id: string, update: MemoryUpdate) {
+export async function updateMemory(id: string, update: MemoryUpdate, projectId: string | null = null) {
   const response = await requestWithDemoAuth(
-    `${apiBase}/v1/memories/${encodeURIComponent(id)}?user_key=${userKey}`,
+    `${apiBase}/v1/memories/${encodeURIComponent(id)}?user_key=${userKey}${memoryScopeQuery(projectId)}`,
     {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -311,26 +317,26 @@ export async function updateMemory(id: string, update: MemoryUpdate) {
   return parseResponse<Memory>(response);
 }
 
-export async function undoMemory(id: string) {
+export async function undoMemory(id: string, projectId: string | null = null) {
   const response = await requestWithDemoAuth(
-    `${apiBase}/v1/memories/${encodeURIComponent(id)}/undo?user_key=${userKey}`,
+    `${apiBase}/v1/memories/${encodeURIComponent(id)}/undo?user_key=${userKey}${memoryScopeQuery(projectId)}`,
     { method: "POST" },
   );
   return parseResponse<Memory>(response);
 }
 
-export async function fetchTimeline(): Promise<TimelineItem[]> {
+export async function fetchTimeline(projectId: string | null = null): Promise<TimelineItem[]> {
   const response = await requestWithDemoAuth(
-    `${apiBase}/v1/timeline?user_key=${userKey}&limit=100`,
+    `${apiBase}/v1/timeline?user_key=${userKey}&limit=100${memoryScopeQuery(projectId)}`,
   );
   return parseResponse<TimelineItem[]>(response);
 }
 
-export async function generateReview(periodDays: number) {
+export async function generateReview(periodDays: number, projectId: string | null = null) {
   const response = await requestWithDemoAuth(`${apiBase}/v1/reviews`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ user_key: userKey, period_days: periodDays }),
+    body: JSON.stringify({ user_key: userKey, period_days: periodDays, project_id: projectId }),
   });
   return parseResponse<{ period_days: number; content: string }>(response);
 }

@@ -8,12 +8,14 @@ from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.business import BusinessConfig
+from app.memory.commands import MemoryCommandType, parse_memory_command
 from app.memory.embeddings import embed_text, embedding_fallback_payload
 from app.memory.service import MemoryService
-from app.persistence.models import MemoryKind
+from app.persistence.models import MemoryKind, Message, MessageRole
 from app.persistence.repositories import MemoryRepository
 from app.protocol.tools import ToolExecutionContext, ToolResult
 from app.security.redaction import redact_secrets
@@ -70,6 +72,7 @@ def create_memory_tools(
     source_message_id: UUID,
     business: BusinessConfig,
     embedding_model=None,
+    project_id: UUID | None = None,
     emit: ToolEventSink | None = None,
     timeout_seconds: float = 8.0,
 ) -> list[MemoryTool]:
@@ -85,7 +88,7 @@ def create_memory_tools(
                 attempt, expected_dimensions=business.models.embedding_dimensions,
                 source="search_memory",
             ))
-        matches = await MemoryRepository(session).search_hybrid(
+        matches = await MemoryRepository(session, project_id=project_id, include_personal=True).search_hybrid(
             user_id, safe_query, query_embedding=attempt.vector,
             limit=max(1, min(args.limit, business.memory.tool_retrieve_limit)),
             vector_weight=business.memory.vector_weight,
@@ -100,25 +103,35 @@ def create_memory_tools(
         )
         return ToolResult.success([
             {"id": str(item.memory.id), "content": item.memory.content,
+             "project_id": str(item.memory.project_id) if item.memory.project_id else None,
              "kind": item.memory.kind.value, "score": round(item.score, 4)}
             for item in matches
         ])
 
     async def timeline(arguments: Mapping[str, Any]) -> ToolResult:
         args = TimelineArguments.model_validate(arguments)
-        memories = await MemoryRepository(session).list_timeline(
+        memories = await MemoryRepository(session, project_id=project_id, include_personal=True).list_timeline(
             user_id, limit=max(1, min(args.limit, business.memory.tool_retrieve_limit * 2))
         )
         return ToolResult.success([
             {"id": str(memory.id), "content": memory.content,
              "kind": memory.kind.value,
+             "project_id": str(memory.project_id) if memory.project_id else None,
              "valid_from": memory.valid_from.isoformat() if memory.valid_from else None}
             for memory in memories
         ])
 
     async def propose(arguments: Mapping[str, Any]) -> ToolResult:
         args = ProposeArguments.model_validate(arguments)
-        memory = await MemoryService(session, business=business).propose_update(
+        if project_id is not None:
+            source = await session.scalar(select(Message).where(
+                Message.id == source_message_id, Message.conversation_id == conversation_id,
+                Message.role == MessageRole.USER,
+            ))
+            command = parse_memory_command(source.content) if source and not source.is_redacted else None
+            if not command or command.type is not MemoryCommandType.SAVE or command.target != args.content.strip():
+                return ToolResult.success({"created": False, "status": "rejected", "reason": "项目工具日志和临时尝试不进入长期记忆；请用户明确使用记住指令"})
+        memory = await MemoryService(session, business=business, project_id=project_id).propose_update(
             user_id=user_id, content=args.content,
             source_message_id=source_message_id, conversation_id=conversation_id,
             kind=MemoryKind(args.kind),

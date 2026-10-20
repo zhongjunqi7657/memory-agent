@@ -54,8 +54,9 @@ class ConflictCandidateSelector:
         *,
         embedding_model=None,
         business: BusinessConfig | None = None,
+        project_id: UUID | None = None,
     ) -> None:
-        self.repository = MemoryRepository(session)
+        self.repository = MemoryRepository(session, project_id=project_id)
         self.embedding_model = embedding_model
         self.business = business or get_business_config()
 

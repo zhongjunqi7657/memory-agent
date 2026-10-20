@@ -21,7 +21,7 @@ async def test_memory_tools_keep_user_scope_limits_and_source(monkeypatch):
     service = SimpleNamespace(propose_update=AsyncMock(return_value=SimpleNamespace(
         id=uuid4(), status=MemoryStatus.PENDING
     )))
-    monkeypatch.setattr(module, "MemoryRepository", lambda session: repository)
+    monkeypatch.setattr(module, "MemoryRepository", lambda session, **kwargs: repository)
     monkeypatch.setattr(module, "MemoryService", lambda session, **kwargs: service)
     tools = module.create_memory_tools(
         object(), user_id=user, conversation_id=conversation, source_message_id=source,
@@ -48,7 +48,7 @@ async def test_request_tools_do_not_share_sessions_and_redact_query(monkeypatch)
     captured = []
 
     class Repository:
-        def __init__(self, session):
+        def __init__(self, session, **kwargs):
             self.session = session
 
         async def search_hybrid(self, user_id, query, **kwargs):

@@ -17,7 +17,8 @@ from app.memory.embeddings import (
     mark_embedding_unavailable,
 )
 from app.memory.policy import MemoryCandidate, MemoryDecision, assess_candidate
-from app.persistence.models import Memory, MemoryKind, MemoryStatus
+from app.memory.scope import memory_scope, validate_project
+from app.persistence.models import Conversation, Memory, MemoryKind, MemoryStatus
 from app.persistence.repositories import MemoryRepository
 
 
@@ -28,8 +29,10 @@ class MemoryService:
         *,
         business: BusinessConfig | None = None,
         embedding_model=None,
+        project_id: UUID | None = None,
     ):
         self.session = session
+        self.project_id = project_id
         self.business = business or get_business_config()
         self.embedding_model = embedding_model
 
@@ -44,9 +47,18 @@ class MemoryService:
         assessment = assess_candidate(candidate, config=self.business.memory)
         if assessment.decision is MemoryDecision.REJECT:
             return None
+        await validate_project(self.session, user_id, self.project_id)
+        if self.project_id is not None and conversation_id is not None:
+            source = await self.session.scalar(select(Conversation.id).where(
+                Conversation.id == conversation_id, Conversation.user_id == user_id,
+                Conversation.project_id == self.project_id,
+            ))
+            if source is None:
+                raise ValueError("项目记忆来源会话与作用域不一致")
         if source_message_id:
             existing_query = select(Memory).where(
                 Memory.user_id == user_id,
+                memory_scope(self.project_id),
                 Memory.source_message_id == source_message_id,
                 Memory.status != MemoryStatus.DELETED,
             )
@@ -63,6 +75,7 @@ class MemoryService:
                 return existing
         matching_query = select(Memory).where(
             Memory.user_id == user_id,
+            memory_scope(self.project_id),
             Memory.status == MemoryStatus.ACTIVE,
             Memory.content == assessment.content,
         )
@@ -102,6 +115,7 @@ class MemoryService:
         memory = Memory(
             id=uuid4(),
             user_id=user_id,
+            project_id=self.project_id,
             kind=candidate.kind,
             status=status,
             sensitivity=assessment.sensitivity,
@@ -160,12 +174,13 @@ class MemoryService:
         normalized = content.strip()
         if not normalized:
             return None
-        if normalized.startswith("我的"):
-            normalized = f"用户的{normalized[2:]}"
-        elif normalized.startswith("我"):
-            normalized = f"用户{normalized[1:]}"
-        elif not normalized.startswith("用户"):
-            normalized = f"用户{normalized}"
+        if self.project_id is None:
+            if normalized.startswith("我的"):
+                normalized = f"用户的{normalized[2:]}"
+            elif normalized.startswith("我"):
+                normalized = f"用户{normalized[1:]}"
+            elif not normalized.startswith("用户"):
+                normalized = f"用户{normalized}"
         return await self.add_candidate(
             user_id=user_id,
             candidate=MemoryCandidate(
@@ -182,12 +197,12 @@ class MemoryService:
         )
 
     async def forget(self, *, user_id: UUID, query: str, limit: int = 10) -> list[Memory]:
-        return await MemoryRepository(self.session).soft_delete_matching(
+        return await MemoryRepository(self.session, project_id=self.project_id).soft_delete_matching(
             user_id, query, limit=limit
         )
 
     async def list_active(self, *, user_id: UUID, limit: int = 10) -> list[Memory]:
-        return await MemoryRepository(self.session).list_for_user(
+        return await MemoryRepository(self.session, project_id=self.project_id).list_for_user(
             user_id, status=MemoryStatus.ACTIVE, limit=limit
         )
 
@@ -200,7 +215,7 @@ class MemoryService:
         source_message_id: UUID | None,
         conversation_id: UUID | None = None,
     ) -> tuple[Memory | None, list[Memory]]:
-        repository = MemoryRepository(self.session)
+        repository = MemoryRepository(self.session, project_id=self.project_id)
         matches = await repository.search_hybrid(user_id, old_query, limit=10)
         new_memory = await self.add_explicit(
             user_id=user_id,
@@ -253,6 +268,7 @@ class MemoryService:
         content: str | None = None,
         importance: float | None = None,
     ) -> Memory:
+        self._check_scope(memory)
         metadata = dict(memory.metadata_)
         metadata["undo"] = {
             "status": memory.status.value,
@@ -287,6 +303,7 @@ class MemoryService:
         return memory
 
     async def undo(self, memory: Memory) -> Memory:
+        self._check_scope(memory)
         metadata = dict(memory.metadata_)
         snapshot = metadata.pop("undo", None)
         if not isinstance(snapshot, dict):
@@ -303,6 +320,7 @@ class MemoryService:
             superseded = await self.session.scalars(
                 select(Memory).where(
                     Memory.user_id == memory.user_id,
+                    memory_scope(memory.project_id),
                     Memory.superseded_by_id == memory.id,
                     Memory.status == MemoryStatus.SUPERSEDED,
                 )
@@ -312,6 +330,10 @@ class MemoryService:
                 previous.superseded_by_id = None
         await self.session.flush()
         return memory
+
+    def _check_scope(self, memory: Memory) -> None:
+        if memory.project_id != self.project_id:
+            raise ValueError("记忆不属于当前作用域")
 
     async def _activate_pending(self, memory: Memory) -> None:
         raw_ids = memory.metadata_.get("conflicts_with", [])
@@ -325,6 +347,7 @@ class MemoryService:
             conflicts = await self.session.scalars(
                 select(Memory).where(
                     Memory.user_id == memory.user_id,
+                    memory_scope(memory.project_id),
                     Memory.id.in_(conflict_ids),
                     Memory.status == MemoryStatus.ACTIVE,
                 )
@@ -355,6 +378,7 @@ class MemoryService:
         matches = await self.session.scalars(
             select(Memory).where(
                 Memory.user_id == user_id,
+                memory_scope(self.project_id),
                 Memory.status == MemoryStatus.ACTIVE,
                 or_(*conditions),
             )
@@ -367,6 +391,7 @@ class MemoryService:
         previous = await self.session.scalars(
             select(Memory).where(
                 Memory.user_id == user_id,
+                memory_scope(self.project_id),
                 Memory.canonical_key == canonical_key,
                 Memory.status == MemoryStatus.ACTIVE,
                 Memory.id != superseded_by_id,

@@ -241,3 +241,79 @@ it.each([{ local: { enabled: false } }, { tools: { enabled: false } }])("explain
   expect(host.querySelector('.project-access-warning')!.textContent).toContain("暂时无法读取项目");
   expect(host.querySelector('.project-trigger')!.textContent).toContain("demo");
 });
+
+async function selectMemoryScope(projectId: string | null) {
+  await act(async () => {
+    const select = host.querySelector<HTMLSelectElement>(".filter-bar select")!;
+    select.value = projectId ?? "";
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+}
+
+it("discards an old timeline response after leaving a scope and returning to it", async () => {
+  let finishOld!: (items: api.TimelineItem[]) => void;
+  const item = (id: string, content: string): api.TimelineItem => ({ id, content, project_id: null,
+    kind: "semantic", status: "active", importance: 0.5, conversation_id: null,
+    valid_from: null, created_at: "2026-10-20" });
+  vi.mocked(api.fetchTimeline).mockImplementationOnce(() => new Promise((resolve) => { finishOld = resolve; }))
+    .mockResolvedValueOnce([item("a", "项目时间线")])
+    .mockResolvedValueOnce([item("fresh", "最新个人时间线")]);
+  await act(async () => root.render(<App />));
+  await click("时间线与回顾");
+  await selectMemoryScope(project.id);
+  await selectMemoryScope(null);
+  expect(host.textContent).toContain("最新个人时间线");
+  await act(async () => finishOld([item("old", "已经过期的个人时间线")]));
+  expect(host.textContent).toContain("最新个人时间线");
+  expect(host.textContent).not.toContain("已经过期的个人时间线");
+});
+
+it("ignores a review failure from the project that was left", async () => {
+  vi.mocked(api.fetchTimeline).mockResolvedValue([]);
+  let failReview!: (error: Error) => void;
+  vi.mocked(api.generateReview).mockImplementation(() => new Promise((_resolve, reject) => { failReview = reject; }));
+  await act(async () => root.render(<App />));
+  await click("时间线与回顾");
+  await click("生成回顾");
+  await selectMemoryScope(project.id);
+  await act(async () => failReview(new Error("旧范围回顾失败")));
+  expect(host.textContent).not.toContain("旧范围回顾失败");
+  expect([...host.querySelectorAll("button")].find((button) => button.textContent === "生成回顾")?.disabled).toBe(false);
+});
+
+function memory(id: string, projectId: string | null): api.Memory {
+  return { id, project_id: projectId, content: `${id}约定`, kind: "semantic", status: "active",
+    sensitivity: "normal", confidence: 1, importance: 0.5, canonical_key: null,
+    metadata: {}, source_message_id: null, source_message_ids: [], conversation_id: null };
+}
+
+it("uses each memory's own scope when deleting from the mixed project sidebar", async () => {
+  const personal = memory("personal", null);
+  const scoped = memory("project", project.id);
+  vi.mocked(api.fetchConversations).mockResolvedValue([conversation]);
+  vi.mocked(api.fetchMemories).mockResolvedValue([personal, scoped]);
+  vi.mocked(api.updateMemory).mockImplementation(async (id) => ({ ...(id === personal.id ? personal : scoped), status: "deleted" }));
+  await act(async () => root.render(<App />));
+  expect(api.fetchMemories).toHaveBeenLastCalledWith(project.id, true);
+  expect(host.querySelector(".memory-panel")?.textContent).toContain("个人 · 长期偏好");
+  expect(host.querySelector(".memory-panel")?.textContent).toContain("项目 · 长期偏好");
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('[aria-label="删除记忆"]')[0].click());
+  expect(api.updateMemory).toHaveBeenLastCalledWith(personal.id, { status: "deleted" }, null);
+  await act(async () => host.querySelectorAll<HTMLButtonElement>('[aria-label="删除记忆"]')[1].click());
+  expect(api.updateMemory).toHaveBeenLastCalledWith(scoped.id, { status: "deleted" }, project.id);
+});
+
+it("passes the selected project for confirming and undoing in memory management", async () => {
+  const pending: api.Memory = { ...memory("pending", project.id), status: "pending", metadata: { undo: {} } };
+  vi.mocked(api.fetchMemories).mockImplementation(async (id) => id === project.id ? [pending] : []);
+  vi.mocked(api.updateMemory).mockResolvedValue({ ...pending, status: "active" });
+  vi.mocked(api.undoMemory).mockResolvedValue(pending);
+  await act(async () => root.render(<App />));
+  await click("长期记忆");
+  await selectMemoryScope(project.id);
+  expect(api.fetchMemories).toHaveBeenLastCalledWith(project.id, false);
+  await click("确认");
+  expect(api.updateMemory).toHaveBeenCalledWith(pending.id, { status: "active" }, project.id);
+  await click("撤销");
+  expect(api.undoMemory).toHaveBeenCalledWith(pending.id, project.id);
+});

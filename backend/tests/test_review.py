@@ -11,7 +11,7 @@ from app.persistence.models import MemoryKind, MemoryStatus
 
 
 class FakeRepository:
-    def __init__(self, _session):
+    def __init__(self, _session, **kwargs):
         pass
 
     async def list_for_user(self, _user_id, *, limit):

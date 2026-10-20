@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.memory.review import ReviewService
+from app.memory.scope import validate_project
 from app.persistence.db import get_session
 from app.persistence.models import MemoryKind, MemoryStatus
 from app.persistence.repositories import ConversationRepository, MemoryRepository
@@ -23,6 +24,7 @@ class TimelineItem(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    project_id: UUID | None = None
     content: str
     kind: MemoryKind
     status: MemoryStatus
@@ -35,6 +37,7 @@ class TimelineItem(BaseModel):
 class ReviewRequest(BaseModel):
     user_key: str = Field(default="demo-user", min_length=1, max_length=128)
     period_days: int = Field(default=7, ge=1, le=365)
+    project_id: UUID | None = None
 
 
 class ReviewResponse(BaseModel):
@@ -46,12 +49,17 @@ class ReviewResponse(BaseModel):
 async def get_timeline(
     user_key: Annotated[str, Query(min_length=1, max_length=128)] = "demo-user",
     limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    project_id: UUID | None = None,
     session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> list[TimelineItem]:
     user = await ConversationRepository(session).get_user(user_key)
     if user is None:
         return []
-    memories = await MemoryRepository(session).list_timeline(user.id, limit=limit)
+    try:
+        await validate_project(session, user.id, project_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    memories = await MemoryRepository(session, project_id=project_id).list_timeline(user.id, limit=limit)
     return [TimelineItem.model_validate(memory) for memory in memories]
 
 
@@ -67,8 +75,12 @@ async def generate_review(
             content="这段时间还没有足够的长期记忆可用于生成回顾。",
         )
     try:
+        await validate_project(session, user.id, request.project_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    try:
         content = await ReviewService(session).generate(
-            user_id=user.id, period_days=request.period_days
+            user_id=user.id, period_days=request.period_days, project_id=request.project_id
         )
     except RuntimeError as error:
         raise HTTPException(status_code=503, detail="模型服务尚未配置") from error

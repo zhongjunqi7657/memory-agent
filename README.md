@@ -62,13 +62,19 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)、[主分支合并检查记录](docs/main-merge-2026-10-19.md)。截至 2026-10-19，两个开发分支的工具/MCP/CLI、项目对话交互和 Markdown 改动已纳入本次主分支合并；阶段 0 至阶段 3 已通过门禁，阶段 4 仍在开发验收。合并结果完整回归为后端 246 项、前端 27 项通过，记忆离线评测仍保留 4 条既有质量失败。
+开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)、[主分支合并检查记录](docs/main-merge-2026-10-19.md)。截至 2026-10-20，阶段 0 至阶段 3 已通过门禁，阶段 5 分层长期记忆已完成自动化验收；阶段 4 的完整真实界面/命令演示仍待验收，阶段 6/7 尚未开始。最新完整回归为后端 265 项（零跳过）、前端 35 项通过，迁移往返、Ruff、生产构建与离线基线一致性通过；记忆离线评测仍保留 4 条既有质量失败。
 
 首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。统一 Tool 执行核心、官方 MCP stdio Client、legacy HTTP 兼容入口与最小 CLI 已完成。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取，以及绑定内容和模型版本的 Embedding 补偿任务。
 
 Graph 使用三个请求级内置记忆工具与 MCP 远程工具快照，通过同一 Function Calling 循环和 ToolExecutor 执行。统一管线校验 JSON Schema、显式能力权限、超时与取消，并写入 `tool.execution.*` 运行事件。系统使用 PostgreSQL Checkpoint 保存会话图状态；长对话使用分批持久摘要与统一 Token 预算。Embedding 降级原因、补偿版本和上下文裁剪状态均写入可重放运行事件。前端包含聊天、独立记忆治理、时间线/周期回顾和非敏感设置四个工作区。详细验收见 [改造记录](docs/tool-mcp-implementation.md)；架构和使用说明见 [架构文档](docs/architecture.md) 与 [演示流程](docs/demo-script.md)。
 
 桌面化前阶段 1/2/3 已完成项目目录绑定、任务状态/取消、运行中事件回放、重启中断、目录互斥、本地文本文件工具、命令审批、Windows 子进程树回收，以及任务基线 Diff、安全撤销和显式 Git worktree 的创建、带回与清理。接口与限制见[阶段 1 验收记录](docs/pre-desktop-stage1-run-control.md)、[阶段 2 验收记录](docs/pre-desktop-stage2-controlled-execution.md)和[阶段 3 验收记录](docs/pre-desktop-stage3-workspace-changes.md)。本地执行默认关闭，仅在可信本机设置 `[local].enabled = true` 并选择项目目录后启用；命令与删除需要审批，MCP 连接配置不等于调用批准。默认使用原目录，用户显式选择时才创建 worktree；命令或 MCP 执行后不承诺自动撤销。阶段 4 已将项目选择、审批与 Diff 整合进对话，操作方式见下文及[阶段 4 记录](docs/pre-desktop-stage4-agent-task-ui.md)。API 同一数据库只允许一个运行实例，请使用单进程启动；这不是操作系统沙箱。
+
+### 分层长期记忆
+
+普通聊天保留个人记忆，所有项目均可召回；项目对话只增加当前项目的长期记忆，原目录与受管 worktree 共用同一个项目 ID。项目中发送“记住项目测试约定使用 pytest”会经过既有治理保存到该项目；不同项目的同名约定不会互相替换。项目聊天、工具日志和临时尝试默认只保留为会话上下文，不自动成为长期记忆。新增个人偏好请在不绑定项目的普通聊天中表达。
+
+长期记忆页和时间线可选择个人或某个项目，确认、编辑、删除、撤销和周期回顾均限定所选范围；聊天侧栏同时展示个人与当前项目记忆。在项目中发送“查看我的记忆”“忘记…”或更正只操作该项目。历史记忆保留为个人层，不自动重分类。阶段 5 的实现与验收见[分层长期记忆](docs/pre-desktop-stage5-layered-memory.md)。升级前停止 API/Worker 并备份，在 backend 执行 `uv run alembic upgrade head` 后重启；已有项目记忆时会拒绝直接降级，避免失去隔离。
 
 ### 在对话中使用项目
 

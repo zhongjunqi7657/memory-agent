@@ -13,13 +13,14 @@ function formatStatus(status: Memory["status"]) {
 }
 
 type MemoryPanelProps = {
+  error?: string;
   memories: Memory[];
   onClose: () => void;
   onRefresh: () => void;
   onUpdate: (id: string, status: "active" | "rejected" | "deleted") => void;
 };
 
-export function MemoryPanel({ memories, onClose, onRefresh, onUpdate }: MemoryPanelProps) {
+export function MemoryPanel({ error, memories, onClose, onRefresh, onUpdate }: MemoryPanelProps) {
   const pendingCount = memories.filter((memory) => memory.status === "pending").length;
 
   return (
@@ -32,13 +33,14 @@ export function MemoryPanel({ memories, onClose, onRefresh, onUpdate }: MemoryPa
         </div>
       </div>
       <p className="memory-intro">这里保存的是你明确表达、且未来可能有帮助的信息。</p>
+      {error && <p role="alert" className="memory-intro">{error}</p>}
       {pendingCount > 0 && <div className="pending-summary"><Clock3 size={15} /><span>{pendingCount} 条记忆等待确认</span></div>}
       <div className="memory-list">
         {memories.length === 0 ? (
           <div className="memory-empty"><BookOpen size={20} /><strong>还没有长期记忆</strong><span>聊几次之后，这里会出现可复用的目标、偏好和阶段经历。</span></div>
         ) : memories.map((memory) => (
           <article className="memory-item" key={memory.id}>
-            <div className="memory-item-top"><span className="memory-kind">{formatKind(memory.kind)}</span><span className={`memory-status status-${memory.status}`}>{formatStatus(memory.status)}</span></div>
+            <div className="memory-item-top"><span className="memory-kind">{memory.project_id ? "项目" : "个人"} · {formatKind(memory.kind)}</span><span className={`memory-status status-${memory.status}`}>{formatStatus(memory.status)}</span></div>
             <p>{memory.content}</p>
             {typeof memory.metadata.reason === "string" && <div className="memory-reason">{memory.metadata.reason}</div>}
             {memory.status === "pending" && <div className="memory-actions"><button onClick={() => onUpdate(memory.id, "active")}><Check size={14} />确认</button><button onClick={() => onUpdate(memory.id, "rejected")}><Trash2 size={14} />拒绝</button></div>}

@@ -14,14 +14,17 @@ from app.config.business import BusinessConfig, get_business_config
 from app.config.settings import get_settings
 from app.memory.conflicts import ConflictCandidateSelector
 from app.memory.policy import MemoryCandidate
+from app.memory.scope import memory_scope
 from app.memory.service import MemoryService
 from app.models.qwen import create_chat_model, create_embedding_model
 from app.persistence.models import (
+    Conversation,
     Memory,
     MemoryKind,
     MemorySensitivity,
     MemoryStatus,
     Message,
+    MessageRole,
 )
 
 
@@ -73,11 +76,20 @@ class MemoryExtractor:
             self.embedding_model = embedding_model
 
     async def extract_and_store(
-        self, *, user_id: UUID, message: Message
+        self, *, user_id: UUID, message: Message, project_id: UUID | None = None
     ) -> list[Memory]:
+        if isinstance(message, Message):
+            conversation = await self.session.get(Conversation, message.conversation_id)
+            if conversation is None or conversation.user_id != user_id or conversation.project_id != project_id:
+                raise ValueError("提取来源会话与作用域不一致")
+        # Project chats are temporary by default; explicit commands use MemoryService.
+        if project_id is not None:
+            return []
+        if getattr(message, "is_redacted", False) or getattr(message, "role", MessageRole.USER) != MessageRole.USER:
+            return []
         active_result = await self.session.scalars(
             select(Memory)
-            .where(Memory.user_id == user_id, Memory.status == MemoryStatus.ACTIVE)
+            .where(Memory.user_id == user_id, Memory.status == MemoryStatus.ACTIVE, memory_scope(project_id))
             .order_by(Memory.updated_at.desc())
             .limit(50)
         )
@@ -88,6 +100,7 @@ class MemoryExtractor:
                 self.session,
                 embedding_model=self.embedding_model,
                 business=self.business,
+                project_id=project_id,
             ).select(user_id=user_id, query=message.content)
         priority_memories = [item.memory for item in conflict_candidates]
         priority_ids = {memory.id for memory in priority_memories}

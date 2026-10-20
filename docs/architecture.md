@@ -66,6 +66,7 @@ erDiagram
     MEMORIES {
         uuid id PK
         uuid user_id FK
+        uuid project_id FK
         uuid conversation_id FK
         enum kind
         enum status
@@ -79,6 +80,14 @@ erDiagram
 ```
 
 记忆冲突不会静默覆盖。新候选先进入 `pending` 并记录 `conflicts_with`；用户确认时旧记录才变为 `superseded`。撤销确认会成对恢复旧版本。重复证据合并到 `source_message_ids`，避免为同一事实创建重复记忆。
+
+## 记忆作用域
+
+`memories.project_id = NULL` 表示个人记忆；非空时使用同用户的稳定项目 ID，受管 worktree 不按路径创建新身份。SQL 候选阶段即过滤作用域，自动回答与搜索/时间线工具读取个人和当前项目，管理及修改只操作指定层。去重、冲突、确认和撤销复用同一过滤规则，详情见[阶段 5](pre-desktop-stage5-layered-memory.md)。
+
+项目普通回答不排队提取；稳定约定由用户明确要求记住后经过 MemoryService。旧项目提取任务返回空结果，提取任务校验会话、用户、消息和持久项目快照。Embedding 补偿从记忆而非执行路径取得项目快照，在调用前和锁定刷新后检查作用域及有效状态。旧记忆迁移保留个人身份。
+
+会话创建后项目固定，切换项目开启新会话；消息与摘要按会话隔离，Checkpoint 使用该会话 ID。每次图调用替换数据库预算内消息、摘要、记忆上下文，并清空旧 retrieved_memories，空召回不从 Checkpoint 复活旧数据。前端请求同样携带作用域，项目切换时丢弃旧请求结果。
 
 ## 召回评分
 

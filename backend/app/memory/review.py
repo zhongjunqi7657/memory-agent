@@ -30,8 +30,8 @@ class ReviewService:
         self.business = business or get_business_config()
         self.model = model
 
-    async def generate(self, *, user_id: UUID, period_days: int) -> str:
-        memories = await MemoryRepository(self.session).list_for_user(
+    async def generate(self, *, user_id: UUID, period_days: int, project_id: UUID | None = None) -> str:
+        memories = await MemoryRepository(self.session, project_id=project_id).list_for_user(
             user_id, limit=200
         )
         cutoff = datetime.now(timezone.utc) - timedelta(days=period_days)

@@ -231,8 +231,12 @@ class ConversationRepository:
         )
         if existing:
             return existing
+        conversation = await self.get_conversation(conversation_id, user_id)
+        if conversation is None:
+            raise ValueError("记忆提取来源会话不存在")
         job = ExtractionJob(
             user_id=user_id,
+            project_id=conversation.project_id,
             conversation_id=conversation_id,
             message_id=message_id,
             status=ExtractionJobStatus.QUEUED,
@@ -289,6 +293,7 @@ class ConversationRepository:
             return existing
         job = ExtractionJob(
             user_id=memory.user_id,
+            project_id=memory.project_id,
             conversation_id=conversation_id,
             message_id=message_id,
             status=ExtractionJobStatus.QUEUED,
@@ -308,8 +313,11 @@ class ConversationRepository:
 
 
 class MemoryRepository:
-    def __init__(self, session: AsyncSession):
+    def __init__(self, session: AsyncSession, *, project_id: UUID | None = None, include_personal: bool = False):
         self.session = session
+        from app.memory.scope import memory_scope
+
+        self.scope_filter = memory_scope(project_id, include_personal=include_personal)
 
     async def list_for_user(
         self,
@@ -320,7 +328,7 @@ class MemoryRepository:
     ) -> list[Memory]:
         statement = (
             select(Memory)
-            .where(Memory.user_id == user_id)
+            .where(Memory.user_id == user_id, self.scope_filter)
             .order_by(Memory.updated_at.desc())
             .limit(limit)
         )
@@ -331,7 +339,7 @@ class MemoryRepository:
 
     async def get_for_user(self, memory_id: UUID, user_id: UUID) -> Memory | None:
         return await self.session.scalar(
-            select(Memory).where(Memory.id == memory_id, Memory.user_id == user_id)
+            select(Memory).where(Memory.id == memory_id, Memory.user_id == user_id, self.scope_filter)
         )
 
     async def set_status(self, memory: Memory, status: MemoryStatus) -> Memory:
@@ -395,6 +403,7 @@ class MemoryRepository:
         active_filter = (
             Memory.user_id == user_id,
             Memory.status == MemoryStatus.ACTIVE,
+            self.scope_filter,
         )
         recent_statement = (
             select(Memory)
@@ -425,6 +434,7 @@ class MemoryRepository:
             .where(
                 Memory.user_id == user_id,
                 Memory.status == MemoryStatus.ACTIVE,
+                self.scope_filter,
             )
             .order_by(Memory.valid_from.desc(), Memory.created_at.desc())
             .limit(limit)

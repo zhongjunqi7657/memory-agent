@@ -207,6 +207,7 @@ class Memory(TimestampMixin, Base):
     __tablename__ = "memories"
     __table_args__ = (
         Index("ix_memories_user_status", "user_id", "status"),
+        Index("ix_memories_user_project_status", "user_id", "project_id", "status"),
         Index("ix_memories_user_kind", "user_id", "kind"),
         Index(
             "ix_memories_embedding_hnsw",
@@ -218,6 +219,7 @@ class Memory(TimestampMixin, Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id"))
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
@@ -286,6 +288,7 @@ class ExtractionJob(TimestampMixin, Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    project_id: Mapped[uuid.UUID | None] = mapped_column(ForeignKey("projects.id"))
     user_id: Mapped[uuid.UUID] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )

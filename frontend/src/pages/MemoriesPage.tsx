@@ -1,8 +1,11 @@
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 import { Check, Pencil, RotateCcw, Save, Trash2, X } from "lucide-react";
 import type { Memory, MemoryKind, MemoryStatus, MemoryUpdate } from "../api";
 
 type Props = {
+  scopeControl?: ReactNode;
+  error?: string;
   memories: Memory[];
   loading: boolean;
   onRefresh: () => void;
@@ -18,7 +21,7 @@ const statusLabels: Record<MemoryStatus, string> = {
   rejected: "已拒绝",
 };
 
-export function MemoriesPage({ memories, loading, onRefresh, onUpdate, onUndo }: Props) {
+export function MemoriesPage({ scopeControl, error, memories, loading, onRefresh, onUpdate, onUndo }: Props) {
   const [status, setStatus] = useState<MemoryStatus | "all">("all");
   const [kind, setKind] = useState<MemoryKind | "all">("all");
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -51,6 +54,7 @@ export function MemoriesPage({ memories, loading, onRefresh, onUpdate, onUndo }:
         <button className="secondary-button" onClick={onRefresh}><RotateCcw size={15} />刷新</button>
       </header>
 
+      {scopeControl}
       <div className="filter-bar" aria-label="记忆筛选">
         <div className="segmented-control">
           {(["all", "semantic", "episodic"] as const).map((value) => (
@@ -67,7 +71,7 @@ export function MemoriesPage({ memories, loading, onRefresh, onUpdate, onUndo }:
         </label>
       </div>
 
-      {loading ? <div className="page-empty">正在加载记忆…</div> : visible.length === 0 ? (
+      {error ? <div role="alert" className="page-empty">{error}</div> : loading ? <div className="page-empty">正在加载记忆…</div> : visible.length === 0 ? (
         <div className="page-empty">当前筛选条件下没有记忆。</div>
       ) : (
         <div className="governance-list">
@@ -76,6 +80,7 @@ export function MemoriesPage({ memories, loading, onRefresh, onUpdate, onUndo }:
             return (
               <article className="governance-row" key={memory.id}>
                 <div className="memory-row-meta">
+                  <span>{memory.project_id ? "项目记忆" : "个人记忆"}</span>
                   <span>{memory.kind === "semantic" ? "长期偏好" : "阶段经历"}</span>
                   <span className={`status-${memory.status}`}>{statusLabels[memory.status]}</span>
                   <span>重要度 {Math.round(memory.importance * 100)}%</span>

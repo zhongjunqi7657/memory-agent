@@ -6,11 +6,11 @@ from app.tools.registry import ToolRegistry
 
 
 def build_request_registry(session, *, user_id, conversation_id, source_message_id,
-                           business, embedding_model=None, emit=None, manager=None, execution_directory=None):
+                           business, embedding_model=None, emit=None, manager=None, execution_directory=None, project_id=None):
     tools = create_memory_tools(
         session, user_id=user_id, conversation_id=conversation_id,
         source_message_id=source_message_id, business=business,
-        embedding_model=embedding_model, emit=emit,
+        embedding_model=embedding_model, emit=emit, project_id=project_id,
         timeout_seconds=business.tools.default_timeout_seconds,
     )
     enabled_ids = set(business.tools.allowed_builtin_tools)

@@ -4,10 +4,7 @@ import { Menu, PanelRight, Send, Sparkles, Square } from "lucide-react";
 import {
   fetchConversationMessages,
   fetchConversations,
-  fetchMemories,
   fetchPublicConfig,
-  fetchTimeline,
-  generateReview,
   cancelRun,
   streamChat,
   undoMemory,
@@ -15,11 +12,9 @@ import {
 } from "./api";
 import type {
   ConversationSummary,
-  Memory,
   MemoryUpdate,
   PublicConfig,
   RunEvent,
-  TimelineItem,
   TaskExecutionConfig,
 } from "./api";
 import { ConversationSidebar } from "./components/ConversationSidebar";
@@ -33,6 +28,9 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { TimelinePage } from "./pages/TimelinePage";
 import { fetchConversationRuns } from "./taskApi";
 import { followRunEvents, mergeRunEvents, needsExtractionFollow } from "./runEvents";
+import { MemoryScopeSelector } from "./components/MemoryScopeSelector";
+import { useScopedMemories } from "./useScopedMemories";
+import { useScopedTimeline } from "./useScopedTimeline";
 import { getRunOutput } from "./modelOutput";
 
 type AppView = "chat" | "memories" | "timeline" | "settings";
@@ -91,12 +89,11 @@ function App() {
   const [input, setInput] = useState("");
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-  const [memories, setMemories] = useState<Memory[]>([]);
-  const [timeline, setTimeline] = useState<TimelineItem[]>([]);
+  const [memoryProjectId, setMemoryProjectId] = useState<string | null>(null);
+  const { memories, setMemories, loadMemories, loading: memoryLoading, error: memoryError } = useScopedMemories(view === "chat" ? taskConfig.projectId : memoryProjectId, view === "chat");
+  const { timeline, timelineLoading, review, reviewLoading, error: timelineError, loadTimeline, loadReview } = useScopedTimeline(memoryProjectId);
   const [publicConfig, setPublicConfig] = useState<PublicConfig | null>(null);
-  const [review, setReview] = useState<string | null>(null);
   const [reviewPeriod, setReviewPeriod] = useState(7);
-  const [reviewLoading, setReviewLoading] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [isSelectingProject, setIsSelectingProject] = useState(false);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
@@ -112,12 +109,6 @@ function App() {
   const activeRunIdRef = useRef<string | null>(null);
   const pendingStopRef = useRef(false);
   const runFollowersRef = useRef(new Map<string, AbortController>());
-
-  const loadMemories = useCallback(async () => {
-    const loaded = await fetchMemories();
-    setMemories(loaded);
-    return loaded;
-  }, []);
 
   const loadConversations = useCallback(async () => {
     const loaded = await fetchConversations();
@@ -180,15 +171,6 @@ function App() {
       }
     });
   }, [loadMemories]);
-
-  const loadTimeline = useCallback(async () => {
-    setPageLoading(true);
-    try {
-      setTimeline(await fetchTimeline());
-    } finally {
-      setPageLoading(false);
-    }
-  }, []);
 
   const loadConfig = useCallback(async () => {
     setPageLoading(true);
@@ -285,12 +267,12 @@ function App() {
   useEffect(() => {
     setError(null);
     if (view === "timeline") {
-      void loadTimeline().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "时间线加载失败"));
+      void loadTimeline();
     }
     if (view === "settings") {
       void loadConfig().catch((loadError) => setError(loadError instanceof Error ? loadError.message : "配置加载失败"));
     }
-  }, [loadConfig, loadTimeline, view]);
+  }, [loadConfig, loadTimeline, view, memoryProjectId]);
 
   const currentTitle = useMemo(() => {
     if (view === "memories") return "长期记忆";
@@ -378,7 +360,7 @@ function App() {
 
   async function handleMemoryUpdate(id: string, update: MemoryUpdate) {
     try {
-      const updated = await updateMemory(id, update);
+      const updated = await updateMemory(id, update, memories.find((item) => item.id === id)?.project_id ?? null);
       setMemories((current) => current.map((memory) => (memory.id === id ? updated : memory)));
       await loadMemories();
       if (view === "timeline") await loadTimeline();
@@ -389,7 +371,7 @@ function App() {
 
   async function handleMemoryUndo(id: string) {
     try {
-      const updated = await undoMemory(id);
+      const updated = await undoMemory(id, memories.find((item) => item.id === id)?.project_id ?? null);
       setMemories((current) => current.map((memory) => (memory.id === id ? updated : memory)));
       await loadMemories();
     } catch (undoError) {
@@ -398,15 +380,8 @@ function App() {
   }
 
   async function handleGenerateReview() {
-    setReviewLoading(true);
     setError(null);
-    try {
-      setReview((await generateReview(reviewPeriod)).content);
-    } catch (reviewError) {
-      setError(reviewError instanceof Error ? reviewError.message : "回顾生成失败");
-    } finally {
-      setReviewLoading(false);
-    }
+    await loadReview(reviewPeriod);
   }
 
   function resetConversation() {
@@ -451,7 +426,7 @@ function App() {
           <div className="topbar-title"><span>{currentTitle}</span>{view === "chat" && <span className="topbar-meta">在线 · Qwen Plus</span>}</div>
           {view === "chat" && <button className="icon-button panel-toggle" aria-label="切换记忆面板" onClick={() => setMemoryPanelOpen((open) => !open)}><PanelRight size={19} /></button>}
         </header>
-        {error && view !== "chat" && <div className="workspace-error">{error}</div>}
+        {(error || (view === "timeline" && timelineError)) && view !== "chat" && <div className="workspace-error">{error || timelineError}</div>}
 
         {view === "chat" && (
           <section className="chat-area" aria-label="对话内容">
@@ -484,12 +459,12 @@ function App() {
           </section>
         )}
 
-        {view === "memories" && <MemoriesPage memories={memories} loading={pageLoading} onRefresh={() => void loadMemories()} onUpdate={handleMemoryUpdate} onUndo={handleMemoryUndo} />}
-        {view === "timeline" && <TimelinePage items={timeline} loading={pageLoading} review={review} reviewLoading={reviewLoading} periodDays={reviewPeriod} onPeriodChange={setReviewPeriod} onRefresh={() => void loadTimeline()} onGenerateReview={() => void handleGenerateReview()} />}
+        {view === "memories" && <MemoriesPage scopeControl={<MemoryScopeSelector value={memoryProjectId} onChange={setMemoryProjectId} />} memories={memories} loading={memoryLoading} error={memoryError} onRefresh={() => { void loadMemories().catch(() => undefined); }} onUpdate={handleMemoryUpdate} onUndo={handleMemoryUndo} />}
+        {view === "timeline" && <TimelinePage scopeControl={<MemoryScopeSelector value={memoryProjectId} onChange={setMemoryProjectId} />} items={timeline} loading={timelineLoading} review={review} reviewLoading={reviewLoading} periodDays={reviewPeriod} onPeriodChange={setReviewPeriod} onRefresh={() => void loadTimeline()} onGenerateReview={() => void handleGenerateReview()} />}
         {view === "settings" && <SettingsPage config={publicConfig} loading={pageLoading} onRefresh={() => void loadConfig()} />}
       </main>
 
-      {view === "chat" && memoryPanelOpen && <MemoryPanel memories={memories.filter((memory) => memory.status === "active" || memory.status === "pending")} onClose={() => setMemoryPanelOpen(false)} onRefresh={() => void loadMemories()} onUpdate={(id, status) => void handleMemoryUpdate(id, { status })} />}
+      {view === "chat" && memoryPanelOpen && <MemoryPanel error={memoryError} memories={memories.filter((memory) => memory.status === "active" || memory.status === "pending")} onClose={() => setMemoryPanelOpen(false)} onRefresh={() => { void loadMemories().catch(() => undefined); }} onUpdate={(id, status) => void handleMemoryUpdate(id, { status })} />}
     </div>
   );
 }

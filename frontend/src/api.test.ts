@@ -1,8 +1,37 @@
 import { afterEach, expect, it, vi } from "vitest";
 
-import { cancelRun, streamChat } from "./api";
+import { cancelRun, fetchMemories, fetchTimeline, generateReview, streamChat, undoMemory, updateMemory } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
+
+it("keeps the selected scope on memory reads, edits, undo and reviews", async () => {
+  vi.stubGlobal("sessionStorage", { getItem: () => null });
+  const fetch = vi.fn().mockImplementation(async () => new Response("[]"));
+  vi.stubGlobal("fetch", fetch);
+  await fetchMemories("project/a", true);
+  await fetchTimeline("project/a");
+  await updateMemory("memory", { status: "active" }, "project/a");
+  await undoMemory("memory", "project/a");
+  await generateReview(7, "project/a");
+  for (const call of fetch.mock.calls.slice(0, 4)) expect(call[0]).toContain("project_id=project%2Fa");
+  expect(fetch.mock.calls[0][0]).toContain("include_personal=true");
+  expect(JSON.parse(fetch.mock.calls[4][1].body)).toMatchObject({ project_id: "project/a" });
+});
+
+it("returns to personal requests without retaining the previous project scope", async () => {
+  vi.stubGlobal("sessionStorage", { getItem: () => null });
+  const fetch = vi.fn().mockImplementation(async () => new Response("[]"));
+  vi.stubGlobal("fetch", fetch);
+  await fetchMemories("project-a", true);
+  await fetchMemories();
+  await fetchTimeline();
+  await updateMemory("personal", { status: "deleted" });
+  await undoMemory("personal");
+  await generateReview(7);
+  for (const call of fetch.mock.calls.slice(1, 5)) expect(call[0]).not.toContain("project_id=");
+  expect(fetch.mock.calls[1][0]).toContain("include_personal=false");
+  expect(JSON.parse(fetch.mock.calls[5][1].body).project_id).toBeNull();
+});
 
 it("delivers deltas across fragmented UTF-8 frames before the response finishes", async () => {
   vi.stubGlobal("sessionStorage", { getItem: () => null });

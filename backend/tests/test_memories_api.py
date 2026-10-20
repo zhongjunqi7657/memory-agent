@@ -30,7 +30,7 @@ class FakeSession:
 
 
 class StubConversationRepository:
-    def __init__(self, _session):
+    def __init__(self, _session, **kwargs):
         pass
 
     async def get_user(self, _user_key):
@@ -40,7 +40,7 @@ class StubConversationRepository:
 class StubMemoryRepository:
     memory: Memory
 
-    def __init__(self, _session):
+    def __init__(self, _session, **kwargs):
         pass
 
     async def get_for_user(self, memory_id, user_id):

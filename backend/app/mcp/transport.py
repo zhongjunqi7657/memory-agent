@@ -68,6 +68,7 @@ def build_registry(
     business: BusinessConfig,
     emit=None,
     manager=None,
+    project_id: UUID | None = None,
 ) -> ToolRegistry:
     """Build the same governed memory tools used by the main Agent graph."""
 
@@ -79,6 +80,7 @@ def build_registry(
         business=business,
         emit=emit,
         manager=manager,
+        project_id=project_id,
     )
 
 

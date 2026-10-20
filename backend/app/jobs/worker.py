@@ -20,7 +20,13 @@ from app.memory.embeddings import (
 from app.memory.extractor import MemoryExtractor
 from app.models.qwen import create_embedding_model
 from app.persistence.db import SessionFactory
-from app.persistence.models import ExtractionJob, ExtractionJobStatus, Memory
+from app.persistence.models import (
+    Conversation,
+    ExtractionJob,
+    ExtractionJobStatus,
+    Memory,
+    MemoryStatus,
+)
 from app.persistence.repositories import ConversationRepository
 from app.security.redaction import redact_secrets
 
@@ -64,6 +70,7 @@ def _memory_change(memory: Memory, message_id: UUID) -> dict[str, object]:
         action = "evidence_merged"
     return {
         "id": str(memory.id),
+        "project_id": str(memory.project_id) if memory.project_id else None,
         "content": memory.content,
         "status": memory.status.value,
         "action": action,
@@ -181,7 +188,7 @@ async def process_one() -> bool:
             if job.payload.get("job_type") == "embedding_backfill":
                 memory_id = UUID(str(job.payload["memory_id"]))
                 memory = await session.get(Memory, memory_id)
-                if memory:
+                if memory and memory.user_id == job.user_id and memory.project_id == job.project_id and memory.status in {MemoryStatus.ACTIVE, MemoryStatus.PENDING}:
                     repository = ConversationRepository(session)
                     if not embedding_job_matches(
                         job.payload, memory, config=business.models
@@ -218,6 +225,8 @@ async def process_one() -> bool:
                                 f"{attempt.reason or 'unknown'}"
                             )
                         await session.refresh(memory, with_for_update=True)
+                        if memory.user_id != job.user_id or memory.project_id != job.project_id or memory.status not in {MemoryStatus.ACTIVE, MemoryStatus.PENDING}:
+                            raise ValueError("Embedding 任务作用域或状态已变化")
                         if not embedding_job_matches(
                             job.payload, memory, config=business.models
                         ):
@@ -242,9 +251,14 @@ async def process_one() -> bool:
                                 ),
                             )
             else:
-                memories = await MemoryExtractor(session).extract_and_store(
-                    user_id=job.user_id, message=job.message
-                )
+                conversation = await session.get(Conversation, job.conversation_id)
+                if conversation is None or conversation.user_id != job.user_id or conversation.project_id != job.project_id or job.message.conversation_id != job.conversation_id:
+                    raise ValueError("记忆提取任务来源与作用域不一致")
+                memories = []
+                if job.project_id is None:
+                    memories = await MemoryExtractor(session).extract_and_store(
+                        user_id=job.user_id, message=job.message
+                    )
                 repository = ConversationRepository(session)
                 for memory in memories:
                     if memory.metadata_.get("embedding_status") == "pending":

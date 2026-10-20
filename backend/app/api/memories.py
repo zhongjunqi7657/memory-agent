@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config.business import get_business_config
 from app.config.settings import get_settings
+from app.memory.scope import validate_project
 from app.memory.service import MemoryService
 from app.persistence.db import get_session
 from app.persistence.models import MemoryKind, MemorySensitivity, MemoryStatus
@@ -43,6 +44,7 @@ class MemoryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     id: UUID
+    project_id: UUID | None = None
     kind: MemoryKind
     status: MemoryStatus
     sensitivity: MemorySensitivity
@@ -75,12 +77,18 @@ async def list_memories(
     user_key: Annotated[str, Query(min_length=1, max_length=128)] = "demo-user",
     memory_status: Annotated[MemoryStatus | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 50,
+    include_personal: bool = False,
+    project_id: UUID | None = None,
     session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> list[MemoryResponse]:
     user = await ConversationRepository(session).get_user(user_key)
     if user is None:
         return []
-    memories = await MemoryRepository(session).list_for_user(
+    try:
+        await validate_project(session, user.id, project_id)
+    except ValueError as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    memories = await MemoryRepository(session, project_id=project_id, include_personal=include_personal).list_for_user(
         user.id, status=memory_status, limit=limit
     )
     return [MemoryResponse.model_validate(memory) for memory in memories]
@@ -91,6 +99,7 @@ async def update_memory(
     memory_id: UUID,
     request: MemoryUpdateRequest,
     user_key: Annotated[str, Query(min_length=1, max_length=128)] = "demo-user",
+    project_id: UUID | None = None,
     session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> MemoryResponse:
     if request.status is not None and request.status not in {
@@ -102,14 +111,14 @@ async def update_memory(
         raise HTTPException(status_code=400, detail="不支持的记忆状态")
     user = await ConversationRepository(session).get_user(user_key)
     memory = (
-        await MemoryRepository(session).get_for_user(memory_id, user.id)
+        await MemoryRepository(session, project_id=project_id).get_for_user(memory_id, user.id)
         if user
         else None
     )
     if memory is None:
         raise HTTPException(status_code=404, detail="记忆不存在")
     try:
-        await MemoryService(session).update_memory(
+        await MemoryService(session, project_id=project_id).update_memory(
             memory,
             status=request.status,
             content=request.content,
@@ -126,18 +135,19 @@ async def update_memory(
 async def undo_memory_update(
     memory_id: UUID,
     user_key: Annotated[str, Query(min_length=1, max_length=128)] = "demo-user",
+    project_id: UUID | None = None,
     session: Annotated[AsyncSession, Depends(get_session)] = None,
 ) -> MemoryResponse:
     user = await ConversationRepository(session).get_user(user_key)
     memory = (
-        await MemoryRepository(session).get_for_user(memory_id, user.id)
+        await MemoryRepository(session, project_id=project_id).get_for_user(memory_id, user.id)
         if user
         else None
     )
     if memory is None:
         raise HTTPException(status_code=404, detail="记忆不存在")
     try:
-        await MemoryService(session).undo(memory)
+        await MemoryService(session, project_id=project_id).undo(memory)
     except TypeError as error:
         raise HTTPException(status_code=409, detail=str(error)) from error
     await _queue_embedding_if_needed(session, memory)

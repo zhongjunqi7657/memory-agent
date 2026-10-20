@@ -115,12 +115,14 @@ async def call_tool(
             business=get_business_config(),
             emit=emit,
             manager=manager,
+            project_id=getattr(conversation, "project_id", None),
         )
         context = ToolExecutionContext(
             run_id=str(run.id), agent_id="legacy-http",
             user_id=str(user.id), conversation_id=str(conversation.id),
             source_message_id=str(source_message_id), granted_permissions=request_permissions(manager),
             audit_sink=CallbackAuditSink(emit),
+            project_id=str(conversation.project_id) if getattr(conversation, "project_id", None) else None,
         )
         result = await ToolExecutor(registry).execute(
             ToolCall(str(uuid4()), tool_id, request.arguments), context

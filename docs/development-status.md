@@ -1,6 +1,21 @@
 # 开发状态与后续迭代
 
-更新日期：2026-10-19
+更新日期：2026-10-20
+
+## 阶段 5：分层长期记忆（2026-10-20）
+
+个人记忆与项目记忆已按稳定项目 ID 分层，受管 worktree 共享原项目身份；回答检索读取个人与当前项目，去重、冲突确认/撤销、删除、更正及 Worker 补偿严格限定作用域。项目工具日志和临时尝试不自动提取，稳定约定由用户明确发送“记住…”后进入 MemoryService。记忆管理、侧栏、时间线及周期回顾均传递作用域，切换范围会丢弃迟到请求。
+
+最新补充测试新增 39 个用例（后端 24、前端 15），复现并修复时间线往返切换的迟到响应覆盖及旧范围回顾错误污染。最终完整门禁：后端 **289 passed、0 skipped**，前端 **50 passed**；Ruff、迁移升级/回退/重升、TypeScript/生产构建、差异检查及离线基线一致性均通过，既有 4 条记忆质量失败保持不变。证据目录 `.runtime/baseline/e75fd71fd19243e88964d719332d6101/`；用例矩阵、修复说明与复现步骤见[阶段 5 测试报告](pre-desktop-stage5-test-report.md)。
+
+迁移 `0011_memory_scopes` 保持历史记忆为个人身份，并保护降级时的项目数据。实现、使用方式、接口和自动化证据见[阶段 5 验收记录](pre-desktop-stage5-layered-memory.md)。本次按用户要求推进阶段 5，阶段 4 的未完成人工验收项仍保留，阶段 6/7 尚未开始。随后按用户授权完成开发库备份与迁移，当前版本 `0011_memory_scopes`；API、Worker 与前端已恢复，数据库/Checkpoint 健康，本地工具保持启用。部署记录见阶段 5 文档。
+
+### Delivery notes (2026-10-20, stage 5)
+
+- User acceptance confirmed on 2026-10-20.
+- Separate personal and project memories across retrieval, governance, background jobs and the memory interface; share project identity with managed worktrees.
+- Add scoped migration and regression coverage, including stale timeline and review responses after scope changes.
+- Validation: 289 backend tests and 50 frontend tests passed; Ruff, migration rollback/reapply, TypeScript and the production build passed. Offline evaluation matched the existing baseline with 4 known quality failures.
 
 ## 对话流式生成（2026-10-19）
 
@@ -41,7 +56,7 @@
 | 2. 审批与受控执行 | 已验收 | 文件工具、命令审批、Windows 子进程回收、MCP 调用授权；见[阶段 2](pre-desktop-stage2-controlled-execution.md) |
 | 3. Diff、撤销与可选 worktree | 已验收 | 任务基线、归属保护、显式创建、带回及清理；见[阶段 3](pre-desktop-stage3-workspace-changes.md) |
 | 4. Agent 编码闭环与对话界面 | 开发验收中 | 对话框项目菜单、行内审批、折叠 Diff、历史恢复已接入；真实模型项目识别/读取已验证，完整命令与重连演示待验收 |
-| 5. 分层长期记忆 | 待开始 | 个人/项目/临时上下文隔离，worktree 共享项目身份 |
+| 5. 分层长期记忆 | 已验收 | 用户已确认；个人/项目/临时上下文隔离、Worker 防污染、worktree 共享身份；见[阶段 5](pre-desktop-stage5-layered-memory.md) |
 | 6. MCP 客户端扩展 | 待开始 | Streamable HTTP、resources、prompts、鉴权与连接管理 |
 | 7. 本地交付与整体审计 | 待开始 | 启动与生命周期、本机访问安全、完整演示与最终审计 |
 
