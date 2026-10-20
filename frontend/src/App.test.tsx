@@ -50,6 +50,47 @@ beforeEach(() => {
 });
 afterEach(async () => { await act(async () => root.unmount()); host.remove(); });
 
+it("renders streamed Markdown before completion and replaces it with one final reply", async () => {
+  let publish!: (event: api.RunEvent) => void;
+  let finish!: (response: Awaited<ReturnType<typeof api.streamChat>>) => void;
+  vi.mocked(api.streamChat).mockImplementation(async (_content, _id, onEvent) => {
+    publish = onEvent!;
+    return new Promise((resolve) => { finish = resolve; });
+  });
+  await act(async () => root.render(<App />));
+  await input("生成一段代码"); await click("发送消息");
+  await act(async () => {
+    publish({ run_id: run.run_id, sequence: 1, event_type: "run.started", payload: { conversation_id: conversation.id } });
+    publish({ run_id: run.run_id, sequence: 2, event_type: "model.output.started", payload: { output_id: "one" } });
+    const delta = { run_id: run.run_id, sequence: 3, event_type: "model.output.delta", payload: { output_id: "one", text: "## 实时结果\n\n```python\nprint('好')" } };
+    publish(delta); publish(delta);
+  });
+  expect(host.querySelector("h2")?.textContent).toBe("实时结果");
+  expect(host.querySelector("pre code")?.textContent).toContain("print('好')");
+  expect(host.querySelectorAll(".message-row.assistant h2")).toHaveLength(1);
+  expect(host.querySelector('[aria-label="停止任务"]')).not.toBeNull();
+  await act(async () => finish({ conversation_id: conversation.id, run_id: run.run_id,
+    message: "## 最终结果\n\n```python\nprint('好')\n```", redacted: false, redaction_categories: [], memory_count: 0 }));
+  expect(host.querySelector("h2")?.textContent).toBe("最终结果");
+  expect(host.querySelectorAll(".message-row.assistant h2")).toHaveLength(1);
+  expect(host.querySelector('[aria-label="发送消息"]')).not.toBeNull();
+});
+
+it("restores partial Markdown from persisted events for an interrupted run", async () => {
+  vi.mocked(api.fetchConversations).mockResolvedValue([conversation]);
+  vi.mocked(tasks.fetchConversationRuns).mockResolvedValue([{ ...run, status: "interrupted" }]);
+  vi.mocked(tasks.fetchRun).mockResolvedValue({ ...run, status: "interrupted" });
+  vi.mocked(api.fetchRunEvents).mockResolvedValue([
+    { run_id: run.run_id, sequence: 1, event_type: "model.output.started", payload: { output_id: "one" } },
+    { run_id: run.run_id, sequence: 2, event_type: "model.output.delta", payload: { output_id: "one", text: "## 已生成的部分\n\n- 保留输出" } },
+    { run_id: run.run_id, sequence: 3, event_type: "run.interrupted", payload: {} },
+  ]);
+  await act(async () => root.render(<App />));
+  expect(host.querySelector("h2")?.textContent).toBe("已生成的部分");
+  expect(host.textContent).toContain("运行已中断");
+  expect(api.streamChat).not.toHaveBeenCalled();
+});
+
 it("renders Markdown in a new assistant reply while keeping user input literal", async () => {
   vi.mocked(api.streamChat).mockResolvedValue({ conversation_id: conversation.id, run_id: run.run_id, message: "## 检查结果\n\n**已完成**\n\n| 项目 | 状态 |\n| --- | --- |\n| 格式 | 正常 |", redacted: false, redaction_categories: [], memory_count: 0 });
   await act(async () => root.render(<App />));

@@ -4,6 +4,31 @@ import { cancelRun, streamChat } from "./api";
 
 afterEach(() => vi.unstubAllGlobals());
 
+it("delivers deltas across fragmented UTF-8 frames before the response finishes", async () => {
+  vi.stubGlobal("sessionStorage", { getItem: () => null });
+  let source!: ReadableStreamDefaultController<Uint8Array>;
+  const stream = new ReadableStream<Uint8Array>({ start(controller) { source = controller; } });
+  vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(stream)));
+  let delivered!: () => void;
+  const firstDelta = new Promise<void>((resolve) => { delivered = resolve; });
+  const onEvent = vi.fn(() => delivered());
+  let finished = false;
+  const request = streamChat("hello", null, onEvent).then((response) => { finished = true; return response; });
+  const delta = { run_id: "run-1", sequence: 2, event_type: "model.output.delta", payload: { output_id: "one", text: "中文 **正文**" } };
+  const bytes = new TextEncoder().encode(`event: model.output.delta\ndata: ${JSON.stringify(delta)}\n\n`);
+  const chineseByte = bytes.indexOf(0xe4);
+  source.enqueue(bytes.slice(0, chineseByte + 1));
+  source.enqueue(bytes.slice(chineseByte + 1));
+  await firstDelta;
+  expect(onEvent).toHaveBeenCalledWith(delta);
+  expect(finished).toBe(false);
+  const result = { conversation_id: "conversation-1", run_id: "run-1", message: delta.payload.text,
+    redacted: false, redaction_categories: [], memory_count: 0 };
+  source.enqueue(new TextEncoder().encode(`event: run.completed\ndata: ${JSON.stringify({ event_type: "run.completed", payload: result })}\n\n`));
+  source.close();
+  await expect(request).resolves.toEqual(result);
+});
+
 it.each(["run.cancelled", "run.interrupted"])("stops on %s without polling recovery", async (eventType) => {
   vi.stubGlobal("sessionStorage", { getItem: () => null });
   const event = { run_id: "run-1", sequence: 2, event_type: eventType, payload: { message: "任务已停止" } };

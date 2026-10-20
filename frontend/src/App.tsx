@@ -33,6 +33,7 @@ import { SettingsPage } from "./pages/SettingsPage";
 import { TimelinePage } from "./pages/TimelinePage";
 import { fetchConversationRuns } from "./taskApi";
 import { followRunEvents, mergeRunEvents, needsExtractionFollow } from "./runEvents";
+import { getRunOutput } from "./modelOutput";
 
 type AppView = "chat" | "memories" | "timeline" | "settings";
 
@@ -70,6 +71,8 @@ const liveEventLabels: Record<string, string> = {
   "tool.execution.denied": "工具权限不足",
   "tool.execution.cancelled": "工具调用已取消",
   "model.completed": "正在整理回答",
+  "model.output.started": "正在生成回答",
+  "model.output.delta": "正在生成回答",
   "memory.extraction_queued": "已排队更新长期记忆",
   "memory.command_applied": "已处理记忆指令",
 };
@@ -460,12 +463,12 @@ function App() {
                     <div className="message-author">{message.role === "assistant" ? "Memory Agent" : "你"}</div>
                     {message.role === "assistant" ? <MarkdownContent content={message.content} /> : <div className="message-text">{message.content}</div>}
                     {message.role === "assistant" && message.runEvents && <RunDetails events={message.runEvents} />}
-                    {message.role === "assistant" && message.runId && <ChatRun runId={message.runId} events={message.runEvents} onRecovered={message.runId === recoveredRunId ? restoreCompletedRun : undefined} />}
+                    {message.role === "assistant" && message.runId && <ChatRun runId={message.runId} events={message.runEvents} showOutput={!message.content} onRecovered={message.runId === recoveredRunId ? restoreCompletedRun : undefined} />}
                     {message.redacted && <div className="redaction-note">已在本机脱敏敏感信息</div>}
                   </div>
                 </article>
               ))}
-              {isSending && !recoveredRunId && <article className="message-row assistant"><div className="assistant-avatar"><Sparkles size={15} /></div><div className="message-content-wrap"><div className="message-author">Memory Agent</div><p className="live-message">{liveEvent ?? "正在思考"}</p>{activeRunId && <ChatRun runId={activeRunId} events={liveRunEvents} live onStop={stopActiveChat} />}</div></article>}
+              {isSending && !recoveredRunId && <article className="message-row assistant"><div className="assistant-avatar"><Sparkles size={15} /></div><div className="message-content-wrap"><div className="message-author">Memory Agent</div>{!getRunOutput(liveRunEvents) && <p className="live-message">{liveEvent ?? "正在思考"}</p>}{activeRunId && <ChatRun runId={activeRunId} events={liveRunEvents} live showOutput onStop={stopActiveChat} />}</div></article>}
             </div>
             <div className="composer-wrap">
               {error && <div className="error-banner">{error}</div>}

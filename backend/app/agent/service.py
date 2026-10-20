@@ -449,6 +449,7 @@ class AgentService:
                 max_tool_rounds=tool_round_limit,
                 system_prompt="\n\n".join(part for part in (SYSTEM_PROMPT, workspace_context) if part),
                 checkpointer=checkpointer,
+                output_sink=emit,
             ).ainvoke(
                 {
                     "messages": graph_messages,
@@ -465,7 +466,7 @@ class AgentService:
             )
             if result.get("tool_limit_reached"):
                 await emit("agent.tool_limit_reached", {"tool_rounds": result["tool_rounds"], "limit": tool_round_limit})
-            answer = str(result["messages"][-1].content)
+            answer = result["messages"][-1].text
             await emit("model.completed", {"answer_length": len(answer)})
             return await finish_success(
                 answer, memory_count=len(memories), queue_extraction=True

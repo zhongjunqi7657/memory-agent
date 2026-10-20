@@ -635,6 +635,8 @@ async def test_sse_chat_recalls_memory_across_conversations(
             "memory.embedding_fallback",
             "memory.retrieved",
             "session.loaded",
+            "model.output.started",
+            "model.output.delta",
             "model.completed",
             "memory.extraction_queued",
             "run.completed",
@@ -662,10 +664,12 @@ async def test_sse_chat_recalls_memory_across_conversations(
             6,
             7,
             8,
+            9,
+            10,
         ]
         assert replayed.json()[-1] == {
             "run_id": completed["run_id"],
-            "sequence": 8,
+            "sequence": 10,
             "event_type": "memory.extraction_completed",
             "payload": {
                 "changes": [],

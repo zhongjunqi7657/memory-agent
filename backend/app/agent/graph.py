@@ -16,6 +16,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import REMOVE_ALL_MESSAGES, add_messages
 
+from app.agent.streaming import OutputSink, stream_model, stream_model_sync
 from app.agent.tool_limits import summarize_tool_limit
 from app.agent.tool_node import UnifiedToolNode
 from app.memory.commands import parse_memory_command
@@ -70,6 +71,7 @@ def build_graph(
     max_tool_rounds: int = 4,
     checkpointer: BaseCheckpointSaver | None = None,
     system_prompt: str = SYSTEM_PROMPT,
+    output_sink: OutputSink | None = None,
 ):
     """Build the graph without database access inside orchestration nodes."""
 
@@ -108,14 +110,14 @@ def build_graph(
 
     if not tools:
         def call_model(state: AgentState) -> dict[str, list[BaseMessage]]:
-            response = chat_model.invoke(
+            response = stream_model_sync(chat_model,
                 [_system_message(state, system_prompt), *state["messages"]]
             )
             return {"messages": [response]}
 
         async def call_model_async(state: AgentState) -> dict[str, list[BaseMessage]]:
-            response = await chat_model.ainvoke(
-                [_system_message(state, system_prompt), *state["messages"]]
+            response = await stream_model(chat_model,
+                [_system_message(state, system_prompt), *state["messages"]], emit=output_sink,
             )
             return {"messages": [response]}
 
@@ -132,6 +134,7 @@ def build_graph(
             max_tool_rounds=max_tool_rounds,
             checkpointer=checkpointer,
             system_prompt=system_prompt,
+            output_sink=output_sink,
         )
     if tool_executor is None or tool_context is None:
         raise ValueError("工具 Schema 必须同时注入执行器和上下文")
@@ -140,8 +143,8 @@ def build_graph(
     async def call_model_with_tools(
         state: AgentState,
     ) -> dict[str, list[BaseMessage]]:
-        response = await model_with_tools.ainvoke(
-            [_system_message(state, system_prompt), *state["messages"]]
+        response = await stream_model(model_with_tools,
+            [_system_message(state, system_prompt), *state["messages"]], emit=output_sink,
         )
         return {"messages": [response]}
 
@@ -159,7 +162,7 @@ def build_graph(
 
     async def tool_limit(state: AgentState) -> dict[str, object]:
         return await summarize_tool_limit(chat_model, _system_message(state, system_prompt),
-                                          state["messages"], state.get("tool_rounds", 0))
+                                          state["messages"], state.get("tool_rounds", 0), emit=output_sink)
 
     workflow.add_node("call_model", call_model_with_tools)
     workflow.add_node("tools", execute_tools)

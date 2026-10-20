@@ -23,6 +23,8 @@ flowchart LR
 
 `run.completed` 只表示主回答完成，不表示异步记忆提取已经结束。助手消息通过 `run_id` 关联本轮运行；Worker 成功后追加 `memory.extraction_completed`，达到最终重试上限后追加 `memory.extraction_failed`。前端以 `run_id + sequence` 增量获取并去重，切换会话时取消旧跟随；刷新页面时会从会话历史恢复完整运行事件，并继续跟随尚未产生终态事件的提取任务。
 
+对话模型节点通过 `astream()` 逐段消费响应，聚合完整消息供工具路由，同时将可见正文通过 `model.output.started/delta` 持久化并推送至前端实时渲染 Markdown。每次模型输出有独立 `output_id`，工具参数分片完整聚合后才执行，推理块不作为正文发送。部分输出可通过运行事件恢复，成功结束后只保存一次完整助手消息。详细协议与验证见[对话流式生成](model-streaming.md)。
+
 ## Graph 状态图
 
 ```mermaid

@@ -2,6 +2,12 @@
 
 更新日期：2026-10-19
 
+## 对话流式生成（2026-10-19）
+
+主对话模型调用已由 `invoke/ainvoke` 改为 `stream/astream`：普通回答、工具循环和预算总结均支持逐段正文，经持久化 SSE 事件实时渲染 Markdown。保留工具参数完整聚合、审批/取消、最终消息一次保存、断线和刷新恢复。内部摘要与后台结构化提取保持原有调用方式。
+
+完整门禁通过：后端 **252 passed、0 skipped**，前端 **33 passed**，Ruff、迁移往返、离线基线一致性及生产构建通过。真实 Qwen 网页验证已看到生成过程中的标题/代码块，刷新后正常恢复；后端已重启使改动生效。协议、实现边界与证据见[对话流式生成](model-streaming.md)。
+
 ## Main integration (2026-10-19)
 
 - Integrate `codex/ordinary-chat-conflicts` at `b7fe2ff` and `codex/tool-mcp-cli` at `5114813` into `main`, preserving both branch histories.

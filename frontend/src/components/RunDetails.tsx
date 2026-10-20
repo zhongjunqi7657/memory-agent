@@ -141,7 +141,7 @@ export function RunDetails({ events }: { events: RunEvent[] }) {
         )}
         {changes.length > 0 && <section className="memory-change-section"><h3>本轮记忆变化</h3>{changes.map((change) => <div key={change.id}><span>{memoryChangeLabels[change.action] ?? change.status}</span><p>{change.content}</p></div>)}</section>}
         <ol className="event-list">
-          {events.map((event, index) => (
+          {events.filter((event) => !event.event_type.startsWith("model.output.")).map((event, index) => (
             <li key={`${event.sequence ?? index}-${event.event_type}`}>
               <span>{eventLabels[event.event_type] ?? event.event_type}</span>
               {eventDescription(event) && <small>{eventDescription(event)}</small>}

@@ -5,6 +5,8 @@ import { decideApproval, fetchApprovals, fetchRun, fetchTaskChanges } from "../t
 import type { Approval, TaskChanges as Changes, TaskRun } from "../taskApi";
 import { mergeRunEvents } from "../runEvents";
 import { TaskChanges } from "./TaskChanges";
+import { getRunOutput } from "../modelOutput";
+import { MarkdownContent } from "./MarkdownContent";
 
 const terminal = new Set(["completed", "failed", "cancelled", "interrupted"]);
 const statuses: Record<string, string> = { queued: "等待执行", running: "正在执行", waiting_approval: "等待批准", completed: "已完成", failed: "执行失败", cancelled: "已停止", interrupted: "运行已中断" };
@@ -31,9 +33,9 @@ function ApprovalRequest({ approval, onDecided }: { approval: Approval; onDecide
   </section>;
 }
 
-type Props = { runId: string; events?: RunEvent[]; live?: boolean; onStop?: () => void; onRecovered?: () => void };
+type Props = { runId: string; events?: RunEvent[]; live?: boolean; showOutput?: boolean; onStop?: () => void; onRecovered?: () => void };
 
-export function ChatRun({ runId, events = [], live = false, onStop, onRecovered }: Props) {
+export function ChatRun({ runId, events = [], live = false, showOutput = false, onStop, onRecovered }: Props) {
   const [run, setRun] = useState<TaskRun | null>(null);
   const [recorded, setRecorded] = useState<RunEvent[]>([]);
   const [approvals, setApprovals] = useState<Approval[]>([]);
@@ -85,7 +87,9 @@ export function ChatRun({ runId, events = [], live = false, onStop, onRecovered 
     try { await cancelRun(runId); setRevision((value) => value + 1); }
     catch (failure) { setError(failure instanceof Error ? failure.message : "停止失败"); }
   }
-  return <div className="chat-run" aria-label="本轮任务">
+  return <>
+    {showOutput && <MarkdownContent content={getRunOutput(merged)} />}
+    <div className="chat-run" aria-label="本轮任务">
     {(live || (run && !terminal.has(run.status))) && <div className="chat-run-state"><span>{statuses[run?.status ?? "running"]}</span><button onClick={() => void stop()}>停止任务</button></div>}
     {run && ["failed", "cancelled", "interrupted"].includes(run.status) && <p>{statuses[run.status]}</p>}
     {approvals.map((approval) => <ApprovalRequest key={approval.id} approval={approval} onDecided={() => { setApprovals((current) => current.filter((item) => item.id !== approval.id)); setRevision((value) => value + 1); }} />)}
@@ -96,5 +100,5 @@ export function ChatRun({ runId, events = [], live = false, onStop, onRecovered 
     {changes && (changes.changes.length > 0 || changes.external_effects || changes.conflicts.length > 0) && <TaskChanges runId={runId} initial={changes} />}
     {changesError && <details><summary>本轮文件修改不可用</summary><p>{changesError}</p></details>}
     {error && <p role="alert">{error}</p>}
-  </div>;
+  </div></>;
 }
