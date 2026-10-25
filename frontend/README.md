@@ -1,5 +1,7 @@
 # Frontend
 
+进度同步：2026-10-25，阶段 6 连接管理和审计修复已随 `4d3d903` 推送。前端 9 个测试文件、56 项测试及 TypeScript/生产构建通过；阶段 4 的完整人工交互和阶段 6 用户验收仍待完成，详见[开发状态](../docs/development-status.md)。本次推送未重启开发 API。
+
 React + Vite + TypeScript thin client.
 ## Memory Agent Web
 

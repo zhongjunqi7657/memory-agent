@@ -2,7 +2,7 @@
 
 依据：桌面《Memory-Agent-Tool-MCP-CLI-文件级改造方案.md》。按六个阶段执行回归门禁。
 
-本文件保留 2026-10-09 Tool/MCP/CLI 改造的历史验收结果，其阶段编号与后续桌面化前方案不同。截至 2026-10-19，后续方案已完成阶段 0 至阶段 3，两个开发分支已纳入本次主分支合并；最新进度见[开发状态](development-status.md)，合并证据见[主分支检查记录](main-merge-2026-10-19.md)，后续实施范围见[桌面化前方案](pre-desktop-implementation-plan.md)。
+本文件保留 2026-10-09 Tool/MCP/CLI 改造的历史验收结果，其阶段编号与后续桌面化前方案不同。截至 2026-10-25，后续方案的阶段 0 至阶段 3、阶段 5 已验收；阶段 6 已实现 Streamable HTTP、静态资源/提示词、Bearer/OAuth PKCE 和本机连接设置，审计修复及 324/56 项门禁随 `4d3d903` 推送到 `main`，待用户验收。阶段 4 人工演示和阶段 7 仍待完成。最新进度见[开发状态](development-status.md)，MCP 当前范围见[阶段 6](pre-desktop-stage6-mcp-client.md)，历史合并证据见[主分支检查记录](main-merge-2026-10-19.md)。
 
 ## 基线
 
@@ -92,7 +92,7 @@
 | README 与演示脚本 | README.md、scripts/mcp-filesystem-demo.py；固定官方 Server 读取/写入/拒绝/审计实测 |
 | 旧文件迁移与不提前创建后期能力 | 删除 agent/tools.py 与旧 MCP 注册器；protocol.py 仅兼容新核心类型和 legacy metadata；无 services/、MCP Server、多 Agent等空壳 |
 
-后续 `/v1/tools`、标准 MCP Server、HTTP transport、OAuth、热更新、自动重连等明确不在本轮范围。当前保留 legacy 路径。
+在上述 2026-10-09 改造范围内，`/v1/tools`、标准 MCP Server、HTTP transport、OAuth、热更新、自动重连均未交付。后续桌面化前阶段 6 已增加 Streamable HTTP 和受支持的 OAuth，当前仍保留 legacy 路径，不新增标准 MCP Server，不自动热更新或重放工具调用；以[阶段 6 支持范围](pre-desktop-stage6-mcp-client.md)为准。
 
 ## 最终回归与部署实证
 

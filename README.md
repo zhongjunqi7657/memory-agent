@@ -70,6 +70,8 @@ Graph 使用三个请求级内置记忆工具与 MCP 远程工具快照，通过
 
 桌面化前阶段 1/2/3 已完成项目目录绑定、任务状态/取消、运行中事件回放、重启中断、目录互斥、本地文本文件工具、命令审批、Windows 子进程树回收，以及任务基线 Diff、安全撤销和显式 Git worktree 的创建、带回与清理。接口与限制见[阶段 1 验收记录](docs/pre-desktop-stage1-run-control.md)、[阶段 2 验收记录](docs/pre-desktop-stage2-controlled-execution.md)和[阶段 3 验收记录](docs/pre-desktop-stage3-workspace-changes.md)。本地执行默认关闭，仅在可信本机设置 `[local].enabled = true` 并选择项目目录后启用；命令与删除需要审批，MCP 连接配置不等于调用批准。默认使用原目录，用户显式选择时才创建 worktree；命令或 MCP 执行后不承诺自动撤销。阶段 4 已将项目选择、审批与 Diff 整合进对话，操作方式见下文及[阶段 4 记录](docs/pre-desktop-stage4-agent-task-ui.md)。API 同一数据库只允许一个运行实例，请使用单进程启动；这不是操作系统沙箱。
 
+阶段 6 实现和审计修复已通过英文提交 [4d3d903](https://github.com/zhongjunqi7657/memory-agent/commit/4d3d90381a9600b7d90ad4bf716fe3f6a88f8d86) 推送到 `main`，包含 75 项 MCP 后端测试。本次交付未重启开发 API/Worker；启动或重启到该提交后才能加载最新修复。阶段 6 仍待用户验收，后续安排以[开发状态](docs/development-status.md)为准。
+
 ### 分层长期记忆
 
 普通聊天保留个人记忆，所有项目均可召回；项目对话只增加当前项目的长期记忆，原目录与受管 worktree 共用同一个项目 ID。项目中发送“记住项目测试约定使用 pytest”会经过既有治理保存到该项目；不同项目的同名约定不会互相替换。项目聊天、工具日志和临时尝试默认只保留为会话上下文，不自动成为长期记忆。新增个人偏好请在不绑定项目的普通聊天中表达。

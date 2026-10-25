@@ -1,6 +1,8 @@
 # 桌面化前阶段 6：MCP 客户端扩展
 
-更新日期：2026-10-25。状态：开发及提交前审计完成，已通过自动化门禁和隔离环境浏览器验证，待用户验收。基于 `main` 的 `76f3749` 开发；本轮按用户要求使用英文提交说明同步远端，不部署开发库。
+更新日期：2026-10-25。状态：开发及审计完成，已通过自动化门禁和隔离环境浏览器验证，待用户验收。基于 `main` 的 `76f3749` 开发；实现和审计修复已通过英文提交 [4d3d903](https://github.com/zhongjunqi7657/memory-agent/commit/4d3d90381a9600b7d90ad4bf716fe3f6a88f8d86) 推送到 `origin/main`，远端提交已核对一致。本次未部署开发库或重启开发 API/Worker。
+
+最新验证为 2026-10-25：后端 **324 项**（含 75 项 MCP 相关测试，零失败/错误/跳过）、前端 **56 项 / 9 个文件**及完整门禁通过。下文 2026-10-20 的 316 项结果为历史证据，最终依据见[提交前审计与全量回归](#提交前审计与全量回归2026-10-25)。4 条既有记忆质量失败、真实模型未复测的限制继续保留。
 
 ## 交付范围
 
@@ -95,7 +97,7 @@ capabilities = ["network.access"]
 
 ## 验证证据
 
-最终完整门禁：后端 **316 passed、0 skipped**，前端 **56 passed**，Ruff、锁文件检查、迁移升级/回退/重升、TypeScript/Vite 构建及 `git diff --check` 通过。JUnit 记录后端用时 121.730 秒。36 条离线样本与已提交基线一致，4 条既有质量失败未增加；没有调用真实 Qwen 或刷新预测快照。最终日志 `.runtime/stage6-baseline-release.log`，JUnit/评测目录 `.runtime/baseline/cfc81fe91aa84a569d73f7bdbe60c132/`；较早的门禁另存于 `.runtime/stage6-baseline.log` 和 `.runtime/stage6-baseline-final.log`，分别对应 `76bf7ee3694a45c8905363a06f9a03eb`、`31232deb1d7a4deeb8cfd167cff3ba5f`，不作为最新代码的最终证据。
+2026-10-20 开发完成时的历史门禁：后端 **316 passed、0 skipped**，前端 **56 passed**，Ruff、锁文件检查、迁移升级/回退/重升、TypeScript/Vite 构建及 `git diff --check` 通过。JUnit 记录后端用时 121.730 秒。36 条离线样本与已提交基线一致，4 条既有质量失败未增加；没有调用真实 Qwen 或刷新预测快照。最终日志 `.runtime/stage6-baseline-release.log`，JUnit/评测目录 `.runtime/baseline/cfc81fe91aa84a569d73f7bdbe60c132/`；较早的门禁另存于 `.runtime/stage6-baseline.log` 和 `.runtime/stage6-baseline-final.log`，分别对应 `76bf7ee3694a45c8905363a06f9a03eb`、`31232deb1d7a4deeb8cfd167cff3ba5f`，不作为最新代码的最终证据。
 
 新增 27 个后端用例和 6 个前端用例；既有 stdio 集成用例同时扩展 resources/prompts 验证：
 
@@ -140,6 +142,6 @@ Edge 实测使用独立前端 `127.0.0.1:15173`、真实连接管理 API `127.0.
 
 官方 filesystem Server 互操作复测通过，日志 `.runtime/audit-20261025-filesystem.log`。隔离浏览器在 `127.0.0.1:18017` 使用真实管理路由和生产构建，确认同源 GET 能显示 `audit-browser` 连接；其余页面数据使用桩，不连接开发库或模型。截图 `.runtime/audit-20261025-ui/connections.png`，测试代码与配置保存在同一忽略目录。隔离服务和本轮门禁临时数据库均已回收。
 
-阶段 6 代码、回归测试和文档纳入本轮英文提交。未重启开发 API/Worker、未迁移或修改开发数据库；使用本轮修复前需要将开发 API 重启到当前代码。CodeGraph 命令不可用，用户已明确允许本轮不使用。审计与测试没有发现尚未修复的发布阻塞问题；上述结果不构成绝对无缺陷或完整安全审计的保证。
+阶段 6 代码、回归测试和审计文档已于 2026-10-25 通过 `4d3d903` 推送到 `main`，提交标题为 `Add stage 6 MCP connections and fix audit regressions`。未重启开发 API/Worker、未迁移或修改开发数据库；使用本轮修复前需要将开发 API 重启到当前代码。CodeGraph 命令不可用，用户已明确允许本轮不使用。审计与测试没有发现尚未修复的发布阻塞问题；上述结果不构成绝对无缺陷或完整安全审计的保证。
 
 阶段 4 的独立演示仓库真实模型命令失败修复、原生窗口人工选择和完整重连演示仍待验收；阶段 7 的启动/生命周期、本机访问安全、备份恢复及整体审计尚未开始。记忆质量仍保留 4 条既有失败，不以本阶段门禁替代真实模型效果复测。
