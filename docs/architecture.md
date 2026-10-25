@@ -44,7 +44,9 @@ flowchart TD
 
 Graph 只负责编排。会话、召回和工具所需的数据库访问由服务层准备或通过受控工具注入。三个工具分别是 `search_memory`、`get_user_timeline` 和 `propose_memory_update`；最后一个工具只能创建 `pending` 建议，不能绕过治理直接激活记忆。
 
-工具边界由 `app.tools.ToolRegistry` 和 `ToolExecutor` 管理：请求级内置记忆工具与应用级 MCP 远程快照合并，通过自定义 LangGraph 工具节点执行同一 JSON Schema 校验、能力权限、超时、取消和错误归一化流程。`tool.execution.*` 事件写入现有 run_events；参数仅记录摘要。MCPConnectionManager 在 Checkpoint 初始化后连接官方 SDK stdio Session，应用结束时先关闭 Session/子进程，再关闭 Checkpoint。
+工具边界由 `app.tools.ToolRegistry` 和 `ToolExecutor` 管理：请求级内置记忆工具与应用级 MCP 远程快照合并，通过自定义 LangGraph 工具节点执行同一 JSON Schema 校验、能力权限、超时、取消和错误归一化流程。`tool.execution.*` 事件写入现有 run_events；参数仅记录摘要。MCPConnectionManager 在 Checkpoint 初始化后连接官方 SDK stdio/Streamable HTTP Session，应用结束时先关闭运行任务、Session/子进程，再关闭 Checkpoint。
+
+MCP 静态资源和提示词通过 `catalog.py` 适配为同一执行器中的受控操作；审批包含固定的 URI/提示词名称，返回内容作为工具数据而不是系统消息。连接控制在 `mcp_connections.py`，非敏感覆盖记录由 `ConnectionStore` 原子保存；Bearer 读取进程环境，OAuth 授权码 + PKCE 的单次状态及访问/刷新令牌只存内存。HTTP 失败通知及时终止请求并撤下失效连接快照；显式重连重新发现能力，不重试或重放工具调用。支持边界和验收见[阶段 6](pre-desktop-stage6-mcp-client.md)。
 
 Legacy Tool HTTP API 由 `GET /v1/mcp/tools` 和 `POST /v1/mcp/call` 提供，并复用 HTTP Basic 共享密码；它不是标准 MCP Server。请求携带用户和会话，记忆写入必须携带当前会话用户消息的 source_message_id。API 每次调用创建 Run，调用统一 ToolExecutor，把审计写入同一运行流。`GET /v1/mcp/status` 查询应用级连接状态；CLI 默认不启动模型，仅列 Schema/配置/状态或临时握手。
 

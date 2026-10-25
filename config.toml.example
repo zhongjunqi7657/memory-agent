@@ -83,3 +83,35 @@ capabilities = ["filesystem.write"]
 
 [mcp.servers.tool_permissions.move_file]
 capabilities = ["filesystem.write"]
+
+# Standard MCP Streamable HTTP; this is not the legacy /v1/mcp/call API.
+# Set MCP_SERVICE_TOKEN in the API process environment before enabling bearer auth.
+[[mcp.servers]]
+id = "http-service"
+enabled = false
+transport = "streamable_http"
+url = "https://example.com/mcp"
+command_timeout_seconds = 30.0
+# Optional discovery allowlists, by remote name or exact resource URI.
+# allowed_tools = ["lookup"]
+# allowed_resources = ["service://guide"]
+# allowed_prompts = ["summarize"]
+
+[mcp.servers.auth]
+type = "bearer"
+token_env = "MCP_SERVICE_TOKEN"
+
+[mcp.servers.default_permissions]
+capabilities = ["network.access"]
+
+# Public-client OAuth PKCE alternative (replace the auth table above).
+# [mcp.servers.auth]
+# type = "oauth"
+# [mcp.servers.auth.oauth]
+# client_id = "your-registered-public-client"
+# authorization_url = "https://identity.example/authorize"
+# token_url = "https://identity.example/token"
+# redirect_uri = "http://127.0.0.1:5173/"
+# scope = "read"
+# authorization_timeout_seconds = 300
+# default_token_ttl_seconds = 3600

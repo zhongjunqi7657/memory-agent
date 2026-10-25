@@ -1,0 +1,21 @@
+.mcp-connections { margin-top: 32px; color: #45494f; font-size: 14px; }
+.mcp-heading { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mcp-heading > div { flex: 1; min-width: 220px; }
+.mcp-connections h2 { font-size: 20px; font-weight: 500; margin: 0 0 8px; }
+.mcp-connections h3 { font-size: 16px; font-weight: 500; margin: 0 0 8px; }
+.mcp-connections p { line-height: 1.65; margin: 6px 0; }
+.mcp-row { display: flex; justify-content: space-between; gap: 20px; padding: 20px 0; border-bottom: 1px solid #e3e5e7; flex-wrap: wrap; }
+.mcp-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.mcp-actions button { font: inherit; color: inherit; cursor: pointer; padding: 7px 10px; border: 1px solid #d2d6da; border-radius: 5px; background: transparent; }
+.mcp-actions button:disabled { opacity: .5; cursor: default; }
+.mcp-connections [role="alert"] { color: #a14444; }
+.mcp-form { max-width: 700px; padding: 24px 0; display: grid; gap: 16px; }
+.mcp-form label { display: grid; gap: 7px; line-height: 1.5; }
+.mcp-form input:not([type="checkbox"]), .mcp-form textarea, .mcp-form select { font: inherit; padding: 9px 10px; border: 1px solid #c8cdd2; border-radius: 5px; color: #30353a; background: #fff; width: 100%; box-sizing: border-box; }
+.mcp-form textarea { min-height: 80px; resize: vertical; }
+.mcp-form fieldset { border: 0; padding: 0; margin: 0; }
+.mcp-permissions { display: flex; flex-wrap: wrap; gap: 12px 20px; margin-top: 10px; }
+.mcp-permissions label { display: flex; align-items: center; }
+.mcp-form details > label { margin-top: 12px; }
+.mcp-form summary { cursor: pointer; }
+.mcp-oauth-status { position: fixed; top: 12px; left: 50%; transform: translateX(-50%); z-index: 30; padding: 12px 20px; background: #f5f7f8; border: 1px solid #c8cdd2; color: #30353a; font-size: 14px; max-width: calc(100vw - 40px); }

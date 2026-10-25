@@ -1,5 +1,6 @@
 import { RotateCcw } from "lucide-react";
 import type { PublicConfig } from "../api";
+import { McpConnections } from "../components/McpConnections";
 
 type Props = {
   config: PublicConfig | null;
@@ -30,6 +31,7 @@ export function SettingsPage({ config, loading, onRefresh }: Props) {
           <section><h2>召回权重</h2><dl>{Object.entries(config.memory.weights).map(([name, value]) => <div key={name}><dt>{weightLabels[name] ?? name}</dt><dd>{Math.round(value * 100)}%</dd></div>)}</dl></section>
         </div>
       )}
+      <McpConnections />
     </section>
   );
 }

@@ -9,7 +9,7 @@ from mcp.types import Tool
 
 from app import main
 from app.config.business import BusinessConfig
-from app.mcp.config import MCPConfig
+from app.mcp.config import MCPConfig, MCPServerConfig
 from app.mcp.manager import MCPConnectionManager
 
 
@@ -47,6 +47,41 @@ async def test_failed_server_does_not_block_ready_server_or_publish_partial_tool
     await manager.close()
     assert all(client.closed for client in clients)
     assert manager.snapshot() == ()
+
+
+@pytest.mark.asyncio
+async def test_reconnecting_one_server_never_starts_other_saved_or_disconnected_servers():
+    started = []
+
+    class Client:
+        failure = None
+
+        def __init__(self, config, **kwargs):
+            self.config = config
+
+        async def start(self):
+            started.append(self.config.id)
+
+        async def list_tools(self):
+            return []
+
+        async def close(self):
+            pass
+
+    manager = MCPConnectionManager(MCPConfig(), client_factory=Client)
+    try:
+        for name in ("a", "b"):
+            await manager.configure(MCPServerConfig(id=name, command="python"))
+        await manager.reconnect("b")
+        assert started == ["b"]
+        assert manager.status()[0]["status"] == "stopped"
+        await manager.reconnect("a")
+        await manager.stop("a")
+        await manager.reconnect("b")
+        assert started == ["b", "a", "b"]
+        assert manager.status()[0]["status"] == "stopped"
+    finally:
+        await manager.close()
 
 
 @pytest.mark.asyncio

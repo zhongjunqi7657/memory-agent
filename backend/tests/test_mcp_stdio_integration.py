@@ -70,6 +70,12 @@ async def test_stdio_handshake_permissions_errors_environment_and_cleanup(tmp_pa
         success = await executor.execute(ToolCall("echo", "mcp__fixture__remote_echo", {"value": "ok"}), context)
         assert success.status is ToolStatus.SUCCESS
         assert success.metadata["structured_content"]["value"] == "ok"
+        for adapter in manager.snapshot():
+            if getattr(adapter, "operation", None):
+                result = await executor.execute(ToolCall("content", adapter.id,
+                    {} if adapter.operation == "resource" else {"name": "Ada"}), context)
+                assert result.status is ToolStatus.SUCCESS
+                assert result.metadata["untrusted_mcp_content"]
         environment = await executor.execute(ToolCall("env", "mcp.fixture.secret_env", {}), context)
         assert environment.metadata["structured_content"] == {"secret": None, "allowed": "safe"}
         failed = await executor.execute(ToolCall("fail", "mcp.fixture.fail", {}), context)

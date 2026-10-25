@@ -9,6 +9,7 @@ from app.api.chat import router as chat_router
 from app.api.conversations import router as conversations_router
 from app.api.local_dialogs import router as local_dialogs_router
 from app.api.mcp import router as mcp_router
+from app.api.mcp_connections import router as mcp_connections_router
 from app.api.memories import router as memories_router
 from app.api.projects import router as projects_router
 from app.api.reviews import router as reviews_router
@@ -31,7 +32,8 @@ async def lifespan(_app: FastAPI):
     async with runtime_lease(), checkpoint_lifespan(settings):
         business = get_business_config()
         manager = MCPConnectionManager(business.mcp, default_timeout_seconds=business.tools.default_timeout_seconds,
-                                       cwd=str(business_config_path().parent))
+                                       cwd=str(business_config_path().parent),
+                                       store_path=settings.app_data_dir / "mcp-connections.json")
         _app.state.mcp_manager = manager
         controller = RunController()
         _app.state.run_controller = controller
@@ -65,6 +67,7 @@ app.include_router(approvals_router)
 app.include_router(conversations_router)
 app.include_router(memories_router)
 app.include_router(mcp_router)
+app.include_router(mcp_connections_router)
 app.include_router(reviews_router)
 app.include_router(runs_router)
 app.include_router(projects_router)

@@ -25,6 +25,7 @@ import { ChatRun } from "./components/ChatRun";
 import { ProjectMenu } from "./components/ProjectMenu";
 import { MemoriesPage } from "./pages/MemoriesPage";
 import { SettingsPage } from "./pages/SettingsPage";
+import { McpOAuthCallback } from "./components/McpOAuthCallback";
 import { TimelinePage } from "./pages/TimelinePage";
 import { fetchConversationRuns } from "./taskApi";
 import { followRunEvents, mergeRunEvents, needsExtractionFollow } from "./runEvents";
@@ -417,6 +418,7 @@ function App() {
 
   return (
     <div className={`app-shell ${view === "chat" && memoryPanelOpen ? "memory-open" : ""}`}>
+      <McpOAuthCallback />
       <ConversationSidebar conversations={conversations} currentId={conversationId} open={mobileNavOpen} view={view} busy={isSending || isSelectingProject} onClose={() => setMobileNavOpen(false)} onNew={resetConversation} onSelect={(id) => void selectConversation(id)} onNavigate={navigate} />
       {mobileNavOpen && <button className="scrim" aria-label="关闭导航" onClick={() => setMobileNavOpen(false)} />}
 

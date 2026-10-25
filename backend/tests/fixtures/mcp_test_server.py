@@ -47,6 +47,16 @@ async def crash() -> str:
     os._exit(3)
 
 
+@server.resource("fixture://stdio-guide")
+def guide() -> str:
+    return "stdio resource data"
+
+
+@server.prompt()
+def greeting(name: str) -> str:
+    return f"Hello {name} from stdio"
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[2] == "idle-exit":
         import threading

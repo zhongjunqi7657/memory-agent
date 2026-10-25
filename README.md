@@ -22,7 +22,7 @@
 - API 与记忆提取 Worker 分进程运行
 - SSE 传输主 Agent 运行事件
 
-当前支持 stdio MCP 外部工具接入；文件知识库、语音、渠道接入、子 Agent 与多供应商切换不在本次范围。
+当前支持 stdio 与 Streamable HTTP MCP 客户端，以及工具、静态资源和提示词接入；文件知识库、语音、渠道接入、子 Agent 与多供应商切换不在本次范围。
 
 ## 目录
 
@@ -36,7 +36,7 @@ backend/app/protocol/     Protocol-independent tool contracts
 backend/app/tools/        Unified tool registry, execution and built-ins
 backend/app/permission/   Explicit capability authorization
 backend/app/audit/        Tool execution audit sinks
-backend/app/mcp/          Official SDK stdio MCP client and legacy HTTP adapters
+backend/app/mcp/          Official SDK MCP clients, authentication and connection management
 backend/app/cli/          Model-independent human commands
 backend/app/jobs/         Persistent extraction worker
 backend/app/memory/       Memory extraction, policy and retrieval
@@ -62,7 +62,7 @@ docs/                     Architecture and interview notes
 
 ## 当前阶段
 
-开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)、[主分支合并检查记录](docs/main-merge-2026-10-19.md)。截至 2026-10-20，阶段 0 至阶段 3 已通过门禁，阶段 5 分层长期记忆已完成自动化验收；阶段 4 的完整真实界面/命令演示仍待验收，阶段 6/7 尚未开始。最新完整回归为后端 265 项（零跳过）、前端 35 项通过，迁移往返、Ruff、生产构建与离线基线一致性通过；记忆离线评测仍保留 4 条既有质量失败。
+开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)、[主分支合并检查记录](docs/main-merge-2026-10-19.md)。截至 2026-10-25，阶段 0 至阶段 3、阶段 5 已验收；[阶段 6 MCP 客户端扩展](docs/pre-desktop-stage6-mcp-client.md)已开发完成并通过提交前审计、自动化与隔离界面验证，待用户验收。阶段 4 的完整真实界面/命令演示仍待验收，阶段 7 尚未开始。最新完整回归为后端 324 项（零跳过）、前端 56 项通过，迁移往返、Ruff、生产构建与离线基线一致性通过；记忆离线评测仍保留 4 条既有质量失败。
 
 首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。统一 Tool 执行核心、官方 MCP stdio Client、legacy HTTP 兼容入口与最小 CLI 已完成。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取，以及绑定内容和模型版本的 Embedding 补偿任务。
 
@@ -182,9 +182,13 @@ curl -X POST http://127.0.0.1:8000/v1/mcp/call \
 
 ## 统一 Tool、MCP 与 CLI
 
-`/v1/mcp/tools` 与 `/v1/mcp/call` 是兼容的 Tool HTTP API，不能作为标准 MCP Server 配置给客户端。真正的 MCP 能力是应用通过官方 Python SDK 连接配置中的 stdio Server；仅支持 stdio。
+`/v1/mcp/tools` 与 `/v1/mcp/call` 是兼容的 Tool HTTP API，不能作为标准 MCP Server 配置给客户端。应用通过官方 Python SDK 连接 stdio 或标准 Streamable HTTP Server，按协商能力发现工具、静态资源和提示词；资源和提示词的使用同样经过调用审批。
 
-工具业务配置在 `[tools]`，远程连接配置在 `[mcp]` 与 `[[mcp.servers]]`。旧 `mcp.allowed_tools`、`mcp.tool_timeout_seconds` 会映射到新配置并发出弃用提示。`tools.enabled=false` 禁用全部工具；`mcp.enabled=false` 只停用远程连接。默认内置工具授予 `memory.read`、`memory.write.propose`；MCP 的 `default_permissions.capabilities` 是应用会话授予集合，`tool_permissions.<远程原名>` 是工具所需权限覆盖，覆盖声明不会自动授予额外权限。
+工具业务配置在 `[tools]`，远程连接配置在 `[mcp]` 与 `[[mcp.servers]]`。旧 `mcp.allowed_tools`、`mcp.tool_timeout_seconds` 会映射到新配置并发出弃用提示。`tools.enabled=false` 禁用全部工具；`mcp.enabled=false` 只停用远程连接。默认内置工具授予 `memory.read`、`memory.write.propose`；MCP 的 `default_permissions.capabilities` 和 `tool_permissions.<远程原名>` 均为调用所需权限声明，不是会话授予，连接成功也不等于批准工具调用。
+
+在本机“设置 → MCP 连接”中添加/编辑服务，保存后点击“连接”。界面支持启停、手动重连、断开及鉴权状态；断开或编辑后旧快照不能继续调用，重连不重放先前操作。设置页连接覆盖保存于 `APP_DATA_DIR/mcp-connections.json`，默认 `.runtime/mcp-connections.json`；同 ID 优先于 TOML，命令白名单与全局开关仍由 TOML 管理。连接管理仅允许本机受信任 Origin；这不替代尚待阶段 7 完成的全部本机 API 安全审计。开发 API 须重启到当前代码后才能使用新增接口。
+
+HTTP 支持无鉴权、环境变量引用的 Bearer 和预注册公共客户端 OAuth 授权码 + PKCE。Bearer 变量必须存在于 API 进程环境，任意自定义变量仅写入 `.env` 不会自动导出；不要在配置或地址中填写原始令牌。OAuth 端点显式配置，回调为当前本机前端根地址，令牌仅在内存中，重启后重新授权。“清除授权”断开并清除本机令牌，远端授权须在服务商页面撤销。地址必须使用 HTTPS，HTTP 仅支持 loopback；禁止重定向和隐式环境代理，凭据缺失/失效不退回匿名请求，也不重试工具副作用。配置示例、接口、受支持的 OAuth 范围和验证证据见[阶段 6](docs/pre-desktop-stage6-mcp-client.md)。
 
 子进程仅继承 SDK 的必要系统变量和 `env_allowlist`，密钥仍由环境变量提供。命令必须逐项出现在 `allowed_commands`。Server 代码在当前用户权限下运行，目录限制由 Server 实现；只配置受信任的 Server。API 单个连接失败时继续提供内置记忆工具，`/v1/mcp/status` 返回连接状态。
 
@@ -204,7 +208,7 @@ uv run memory-agent --config ../config.toml mcp test filesystem
 # 同样支持 uv run python -m app.cli tools list
 ```
 
-`mcp status` 查询运行中 API，HTTP Basic 密码从 `DEMO_SHARED_PASSWORD` 环境变量读取。`mcp test` 可测试配置中禁用的 Server，仅连接、握手、tools/list 并立即回收，不执行工具。显式 `--config` 时相对 Server 参数路径基于配置文件目录；应用默认基于仓库根目录。
+`mcp status` 查询运行中 API，HTTP Basic 密码从 `DEMO_SHARED_PASSWORD` 环境变量读取。`mcp test` 可测试配置中禁用的 Server，仅连接、握手、发现支持的工具/静态资源/提示词并立即回收，不执行调用；CLI 从 TOML 读取配置，不加载 API 的本机连接覆盖，OAuth 浏览器授权由设置页完成。显式 `--config` 时相对 Server 参数路径基于配置文件目录；应用默认基于仓库根目录。
 
 复制配置示例后先创建独立的 `demo-workspace` 目录，再启用 filesystem Server。默认只授予读取能力；示例已明确覆盖 `write_file/edit_file/create_directory/move_file` 的写权限要求，因此普通 Agent 请求会拒绝写入。容器镜像默认只有 Python；使用 npx/Node Server 时需要自建含 Node 的镜像并挂载独立演示目录。
 

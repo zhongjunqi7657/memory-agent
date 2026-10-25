@@ -1,6 +1,18 @@
 # 开发状态与后续迭代
 
-更新日期：2026-10-20
+更新日期：2026-10-25
+
+## 阶段 6：MCP 客户端扩展（2026-10-20）
+
+已完成标准 Streamable HTTP、tools/静态 resources/prompts、环境变量 Bearer、预注册公共客户端 OAuth 授权码 + PKCE，以及设置页连接创建/编辑、启停、重连与鉴权管理。资源与提示词复用现有 ToolExecutor、审批和审计，审批中展示真实目标；连接配置不等于调用授权。令牌仅存内存，失效不匿名降级，不重放先前调用。明确不支持的可选能力、配置覆盖与 OAuth 范围见[阶段 6 验收记录](pre-desktop-stage6-mcp-client.md)。
+
+最终完整门禁：后端 **316 passed、0 skipped**，前端 **56 passed**；Ruff、锁文件检查、迁移升级/回退/重升、TypeScript/生产构建、差异检查与离线基线一致性均通过，记忆评测的 4 条既有质量失败不变。最终日志 `.runtime/stage6-baseline-release.log`，证据目录 `.runtime/baseline/cfc81fe91aa84a569d73f7bdbe60c132/`。新增后端 27 项、前端 6 项；真实 stdio/HTTP fixture、官方 filesystem Server 互操作和 Edge 隔离连接/OAuth 界面闭环通过。修复了 HTTP 断线/401 被延迟误报为超时的问题，保护关闭期间的旧快照，并确认重连只启动指定服务、畸形请求不回显秘密。
+
+2026-10-20 按用户要求再次全量复测通过：后端 316 项（含 67 项 MCP 相关测试）、前端 56 项及全部门禁通过；官方 filesystem Server 互操作通过，离线评测的 4 条既有质量失败不变，未调用真实模型。此次日志 `.runtime/full-test-20261020.log`、`.runtime/mcp-recheck-20261020.log`，证据目录 `.runtime/baseline/96eefb21f1a04873bc7d98a200826142/`；临时测试数据库已回收。
+
+2026-10-25 提交前审计修复了同源 GET 误拒、未编辑 TOML 连接被固化、OAuth 清除授权与在途令牌结果的竞态、畸形令牌响应以及提示词参数与审批字段冲突。新增 8 项回归测试，最终后端 **324 项**（含 75 项 MCP 测试）、前端 **56 项**及全部门禁通过，官方 filesystem 互操作及隔离浏览器连接列表验证通过；4 条既有质量失败不变。日志 `.runtime/audit-20261025-baseline.log`，证据目录 `.runtime/baseline/7e47249e285041ec8cf3295c4450acb6/`。按用户要求以英文提交说明同步远端，详见[阶段 6 审计记录](pre-desktop-stage6-mcp-client.md#提交前审计与全量回归2026-10-25)。
+
+阶段 6 当前为开发、审计及门禁完成，待用户验收；未重启开发 API/Worker 或变更开发数据库。阶段 4 的完整真实编码命令/重连人工演示仍待完成，阶段 7 尚未开始；此次不宣称已经完成整体发布或本机访问安全审计。
 
 ## 阶段 5：分层长期记忆（2026-10-20）
 
@@ -57,7 +69,7 @@
 | 3. Diff、撤销与可选 worktree | 已验收 | 任务基线、归属保护、显式创建、带回及清理；见[阶段 3](pre-desktop-stage3-workspace-changes.md) |
 | 4. Agent 编码闭环与对话界面 | 开发验收中 | 对话框项目菜单、行内审批、折叠 Diff、历史恢复已接入；真实模型项目识别/读取已验证，完整命令与重连演示待验收 |
 | 5. 分层长期记忆 | 已验收 | 用户已确认；个人/项目/临时上下文隔离、Worker 防污染、worktree 共享身份；见[阶段 5](pre-desktop-stage5-layered-memory.md) |
-| 6. MCP 客户端扩展 | 待开始 | Streamable HTTP、resources、prompts、鉴权与连接管理 |
+| 6. MCP 客户端扩展 | 开发完成，待用户验收 | stdio/Streamable HTTP、静态 resources/prompts、Bearer/OAuth PKCE、本机连接管理及门禁；见[阶段 6](pre-desktop-stage6-mcp-client.md) |
 | 7. 本地交付与整体审计 | 待开始 | 启动与生命周期、本机访问安全、完整演示与最终审计 |
 
 完整范围与各阶段进入条件见[桌面化前实施与验收方案](pre-desktop-implementation-plan.md)；此前 Tool/MCP/CLI 文件级改造见[历史改造验收记录](tool-mcp-implementation.md)。两套文档的阶段编号属于不同实施批次。
