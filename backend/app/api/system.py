@@ -2,7 +2,7 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -17,6 +17,7 @@ router = APIRouter(tags=["system"])
 
 @router.get("/health")
 async def health(
+    request: Request,
     session: Annotated[AsyncSession, Depends(get_session)],
 ) -> JSONResponse:
     try:
@@ -33,6 +34,12 @@ async def health(
             "service": "memory-agent-api",
             "database": database,
             "checkpoint": checkpoint_status(),
+            "local_runtime": {
+                "managed": hasattr(request.app.state, "local_worker"),
+                "worker_alive": bool(getattr(request.app.state, "local_worker", None)
+                                     and request.app.state.local_worker.is_alive()),
+                "worker_pid": getattr(getattr(request.app.state, "local_worker", None), "pid", None),
+            },
         },
     )
 

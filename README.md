@@ -30,6 +30,7 @@
 backend/app/api/          HTTP and SSE endpoints
 backend/app/agent/        LangGraph state and nodes
 backend/app/execution/    Run lifecycle, cancellation and runtime coordination
+backend/app/local_runtime/ Native startup, lifecycle, diagnostics and database archives
 backend/app/workspace/    Project bindings, task snapshots and managed Git worktrees
 backend/app/config/       Configuration loading
 backend/app/protocol/     Protocol-independent tool contracts
@@ -57,12 +58,12 @@ docs/                     Architecture and interview notes
 - LLM 负责提取和标注；代码负责风险策略、版本和持久化。
 - 任何秘密先在本机脱敏，再发送给模型或写入数据库。
 - 真实模型调用不进入默认 CI，使用 Fake Provider 测试。
-- 线上演示通过 `DEMO_SHARED_PASSWORD` 开启共享密码；默认空值仅适用于本地开发。
+- 本机 API 默认要求 `LOCAL_API_TOKEN`、loopback 与受信任 Origin；演示部署显式使用 `APP_ENV=demo`、配置 `DEMO_SHARED_PASSWORD` 并关闭本地执行。
 - 演示接口按用户限流并计算每日估算 Token 预算，超长输入会在计入配额前拒绝；多副本部署需替换为共享限流存储。
 
 ## 当前阶段
 
-开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)、[主分支合并检查记录](docs/main-merge-2026-10-19.md)。截至 2026-10-25，阶段 0 至阶段 3、阶段 5 已验收；[阶段 6 MCP 客户端扩展](docs/pre-desktop-stage6-mcp-client.md)已开发完成并通过提交前审计、自动化与隔离界面验证，待用户验收。阶段 4 的完整真实界面/命令演示仍待验收，阶段 7 尚未开始。最新完整回归为后端 324 项（零跳过）、前端 56 项通过，迁移往返、Ruff、生产构建与离线基线一致性通过；记忆离线评测仍保留 4 条既有质量失败。
+开发文档入口：[最新进度与阶段导航](docs/development-status.md)、[桌面化前实施与验收方案](docs/pre-desktop-implementation-plan.md)、[主分支合并检查记录](docs/main-merge-2026-10-19.md)。截至 2026-11-05，阶段 0 至阶段 3、阶段 5 已验收；[阶段 6 MCP 客户端扩展](docs/pre-desktop-stage6-mcp-client.md)已开发完成并通过提交前审计、自动化与隔离界面验证，待用户验收。阶段 4 的完整真实界面/命令演示仍待验收，阶段 7 本地交付代码已落地，整体验收状态见[阶段 7 记录](docs/pre-desktop-stage7-local-delivery.md)。最新工作区完整回归为后端 361 项（零跳过）、前端 60 项通过，迁移往返、Ruff、生产构建与离线基线一致性通过；记忆离线评测仍保留 4 条既有质量失败。
 
 首版主链路已完成：数据库模型与迁移、千问适配器、多节点 LangGraph、五因子混合召回、记忆治理、显式记忆指令、SSE 运行事件和提取 Worker 均已落地。统一 Tool 执行核心、官方 MCP stdio Client、legacy HTTP 兼容入口与最小 CLI 已完成。重复事实会合并来源；用户确认后才替换旧版本，并可撤销最近修改。Worker 具备租约、幂等键、失败重试、超时重新领取，以及绑定内容和模型版本的 Embedding 补偿任务。
 
@@ -92,16 +93,21 @@ Graph 使用三个请求级内置记忆工具与 MCP 远程工具快照，通过
 
 ## 本地运行
 
-1. 复制配置：`Copy-Item .env.example .env`，填写 `DASHSCOPE_API_KEY`、`DASHSCOPE_BASE_URL` 和 `POSTGRES_PASSWORD`。
+推荐使用阶段 7 新增的原生入口。Python 3.10—3.13、Node 20+、Git 和外置 PostgreSQL + pgvector 须事先准备，不会自动安装数据库或修改系统配置。
+
+1. 复制配置：`Copy-Item .env.example .env`，填写 `DASHSCOPE_API_KEY`、`DASHSCOPE_BASE_URL`、`POSTGRES_PASSWORD` 和正确的 `DATABASE_URL`。设置 `APP_ENV=local`、`APP_HOST=127.0.0.1`，生成并填入 `LOCAL_API_TOKEN`（`python -c "import secrets; print(secrets.token_urlsafe(32))"`）。已有 `.env` 请手工更新，不覆盖原凭据。
 2. 复制业务配置：`Copy-Item config.toml.example config.toml`，按需调整模型名和阈值。
-3. 启动数据库：`docker compose up -d postgres`。
-4. 执行迁移：`cd backend; uv run alembic upgrade head`。
-5. 启动 API：`uv run uvicorn app.main:app --loop app.runtime:event_loop --reload`。
-6. 单独启动记忆 Worker：`uv run python -m app.jobs.worker`。
+3. 准备数据库；已安装 PostgreSQL 可直接使用，也可运行 `docker compose up -d postgres`。
+4. 安装项目依赖：`uv sync --project backend --locked`、`npm --prefix frontend ci`，构建界面：`npm --prefix frontend run build`。
+5. 停止使用同一数据库的旧 API/Worker、备份后，显式执行 `uv run --project backend memory-agent local migrate`。启动不会自动迁移。
+6. 运行 `uv run --project backend memory-agent local doctor`，确认环境、配置、凭据、数据库、pgvector 和迁移检查通过。
+7. 运行 `uv run --project backend memory-agent local start`，访问 `http://127.0.0.1:8000/`，首次请求输入 `.env` 中的本机访问令牌。MCP OAuth 回调配置为该根地址。
 
-另开一个终端启动前端：`cd frontend; npm install; npm run dev`，然后访问 `http://127.0.0.1:5173`。前端会将 `/v1`、`/health` 和 `/config` 请求代理到 FastAPI；也可以通过 `VITE_API_BASE_URL` 指向已部署的 API。
+Ctrl+C 会关闭本实例 API、Worker、任务与 MCP，并释放 Checkpoint 和数据库租约；外置 PostgreSQL 保持运行。Worker 异常退出时应用会关闭并报告失败，不自动重启或重放调用。日志在 `APP_DATA_DIR/logs/`，MCP 覆盖在 `APP_DATA_DIR/mcp-connections.json`，worktree 在 `APP_DATA_DIR/worktrees/`；任务快照、事件和 Checkpoint 在 PostgreSQL。`APP_DATA_DIR` 默认仓库 `.runtime`，覆盖时必须是绝对路径；配置路径默认基于源码位置，`MEMORY_AGENT_CONFIG` 覆盖也要求绝对路径。
 
-也可以用 Compose 一次启动 PostgreSQL、API 和 Worker（需要先复制 `config.toml.example` 为 `config.toml`）：
+开发界面仍可单独运行 `npm --prefix frontend run dev`，访问 `http://127.0.0.1:5173`，本机令牌验证方式相同。独立调试 API 可在 backend 执行 `uv run uvicorn app.main:app --host 127.0.0.1 --loop app.runtime:event_loop --reload`，另开 Worker；这两个调试进程由各自终端关闭。完整本机安全和恢复边界见[阶段 7 记录](docs/pre-desktop-stage7-local-delivery.md)。
+
+也可以用 Compose 启动受保护的演示部署（需要先准备配置，设置 `DEMO_SHARED_PASSWORD`，并关闭 `[local].enabled`；Compose API 固定使用 demo 模式，端口仅发布到 loopback）：
 
 ```powershell
 Copy-Item .env.example .env
@@ -109,7 +115,16 @@ Copy-Item config.toml.example config.toml
 docker compose up -d --build
 ```
 
-设置 `DEMO_SHARED_PASSWORD` 后，所有 `/v1` 路由要求 HTTP Basic 共享密码；前端首次收到 401 时会在当前浏览器会话中询问密码，不会写入持久化存储。不要把未配置限流和密码的聊天接口直接暴露到公网。`scripts/seed-demo.ps1` 可预置演示流程；`scripts/backup.ps1`、`scripts/restore.ps1` 和 `scripts/clear-data.ps1` 分别负责备份、恢复及清空业务与 Checkpoint 数据。
+演示部署所有 `/v1` 路由要求 HTTP Basic 共享密码；本机模式额外要求独立访问令牌，密码和 `user_key` 均不能替代它。凭据只保存在当前标签页的会话存储，刷新可恢复，关闭标签页后重新验证。本机模式会拒绝非 loopback、恶意 Origin、跨站请求和非 loopback Host；本地其他进程、浏览器扩展或同一操作系统账户仍不属于隔离范围。不要将本机控制 API 开放到公网。
+
+原生数据库备份与恢复（需要 PATH 中有匹配数据库版本的 `pg_dump` / `pg_restore`；先停止 API 与全部 Worker）：
+
+```powershell
+uv run --project backend memory-agent local backup --output F:/memory-agent-backups/before-upgrade.dump
+uv run --project backend memory-agent local restore --input F:/memory-agent-backups/before-upgrade.dump --confirm-restore
+```
+
+备份包含业务数据、审批/事件、任务快照及 Checkpoint；不会覆盖已有归档，失败不报告成功。恢复在单事务中替换目标数据库对象，失败回滚；运行中的 API 租约会拒绝迁移、备份和恢复。请另外保存 `config.toml`、`APP_DATA_DIR/mcp-connections.json`、项目文件和受管 worktree；令牌、`.env` 和 OAuth 凭据不进入数据库归档，凭据须自行安全保存，OAuth 重启后重新授权。项目路径或 worktree 缺失时，数据库恢复不能重建其文件。`scripts/backup.ps1` / `restore.ps1` 继续支持旧 Compose SQL 归档，已补退出码检查，不能与原生 custom 格式混用。
 
 ### 测试
 
@@ -146,36 +161,38 @@ Windows 完整回归可运行 `./scripts/verify-baseline.ps1`。先在当前 wor
 
 ### API 示例
 
+本机示例先将 `.env` 中的 `LOCAL_API_TOKEN` 导入当前 Shell 的同名环境变量；演示部署另外追加 Basic 密码。
+
 ```bash
-curl -X POST http://127.0.0.1:8000/v1/chat \
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" -X POST http://127.0.0.1:8000/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"user_key":"demo-user","content":"我计划两个月内完成 Agent 项目"}'
 
-curl "http://127.0.0.1:8000/v1/memories?user_key=demo-user"
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" "http://127.0.0.1:8000/v1/memories?user_key=demo-user"
 
-curl "http://127.0.0.1:8000/config"
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" "http://127.0.0.1:8000/config"
 
 # 显式记忆控制（不会经过普通聊天提取队列）
-curl -X POST http://127.0.0.1:8000/v1/chat \
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" -X POST http://127.0.0.1:8000/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"user_key":"demo-user","content":"请记住我喜欢先理解原理再看代码"}'
 
-curl -X POST http://127.0.0.1:8000/v1/chat \
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" -X POST http://127.0.0.1:8000/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"user_key":"demo-user","content":"忘记我之前说的考研计划"}'
 
-curl -X POST http://127.0.0.1:8000/v1/chat \
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" -X POST http://127.0.0.1:8000/v1/chat \
   -H "Content-Type: application/json" \
   -d '{"user_key":"demo-user","content":"你记住了我什么？"}'
 
-curl -X POST http://127.0.0.1:8000/v1/reviews \
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" -X POST http://127.0.0.1:8000/v1/reviews \
   -H "Content-Type: application/json" \
   -d '{"user_key":"demo-user","period_days":7}'
 
 # Legacy Tool HTTP 工具发现与调用（设置 DEMO_SHARED_PASSWORD 后追加 -u demo:<password>）
-curl http://127.0.0.1:8000/v1/mcp/tools
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" http://127.0.0.1:8000/v1/mcp/tools
 
-curl -X POST http://127.0.0.1:8000/v1/mcp/call \
+curl -H "X-Local-Token: $LOCAL_API_TOKEN" -X POST http://127.0.0.1:8000/v1/mcp/call \
   -H "Content-Type: application/json" \
   -d '{"user_key":"demo-user","conversation_id":"<conversation-id>","tool":"search_memory","arguments":{"query":"我的学习目标"}}'
 ```
@@ -188,7 +205,7 @@ curl -X POST http://127.0.0.1:8000/v1/mcp/call \
 
 工具业务配置在 `[tools]`，远程连接配置在 `[mcp]` 与 `[[mcp.servers]]`。旧 `mcp.allowed_tools`、`mcp.tool_timeout_seconds` 会映射到新配置并发出弃用提示。`tools.enabled=false` 禁用全部工具；`mcp.enabled=false` 只停用远程连接。默认内置工具授予 `memory.read`、`memory.write.propose`；MCP 的 `default_permissions.capabilities` 和 `tool_permissions.<远程原名>` 均为调用所需权限声明，不是会话授予，连接成功也不等于批准工具调用。
 
-在本机“设置 → MCP 连接”中添加/编辑服务，保存后点击“连接”。界面支持启停、手动重连、断开及鉴权状态；断开或编辑后旧快照不能继续调用，重连不重放先前操作。设置页连接覆盖保存于 `APP_DATA_DIR/mcp-connections.json`，默认 `.runtime/mcp-connections.json`；同 ID 优先于 TOML，命令白名单与全局开关仍由 TOML 管理。连接管理仅允许本机受信任 Origin；这不替代尚待阶段 7 完成的全部本机 API 安全审计。开发 API 须重启到当前代码后才能使用新增接口。
+在本机“设置 → MCP 连接”中添加/编辑服务，保存后点击“连接”。界面支持启停、手动重连、断开及鉴权状态；断开或编辑后旧快照不能继续调用，重连不重放先前操作。设置页连接覆盖保存于 `APP_DATA_DIR/mcp-connections.json`，默认 `.runtime/mcp-connections.json`；同 ID 优先于 TOML，命令白名单与全局开关仍由 TOML 管理。连接管理保留本机受信任 Origin 检查，并叠加阶段 7 的统一令牌和 Host/Origin 保护；整体验收仍需完成阶段 7 人工清单。开发 API 须重启到当前代码后才能使用新增接口。
 
 HTTP 支持无鉴权、环境变量引用的 Bearer 和预注册公共客户端 OAuth 授权码 + PKCE。Bearer 变量必须存在于 API 进程环境，任意自定义变量仅写入 `.env` 不会自动导出；不要在配置或地址中填写原始令牌。OAuth 端点显式配置，回调为当前本机前端根地址，令牌仅在内存中，重启后重新授权。“清除授权”断开并清除本机令牌，远端授权须在服务商页面撤销。地址必须使用 HTTPS，HTTP 仅支持 loopback；禁止重定向和隐式环境代理，凭据缺失/失效不退回匿名请求，也不重试工具副作用。配置示例、接口、受支持的 OAuth 范围和验证证据见[阶段 6](docs/pre-desktop-stage6-mcp-client.md)。
 
@@ -210,7 +227,7 @@ uv run memory-agent --config ../config.toml mcp test filesystem
 # 同样支持 uv run python -m app.cli tools list
 ```
 
-`mcp status` 查询运行中 API，HTTP Basic 密码从 `DEMO_SHARED_PASSWORD` 环境变量读取。`mcp test` 可测试配置中禁用的 Server，仅连接、握手、发现支持的工具/静态资源/提示词并立即回收，不执行调用；CLI 从 TOML 读取配置，不加载 API 的本机连接覆盖，OAuth 浏览器授权由设置页完成。显式 `--config` 时相对 Server 参数路径基于配置文件目录；应用默认基于仓库根目录。
+`mcp status` 查询运行中 API，HTTP Basic 密码及本机令牌从相同 Settings 加载（环境变量/`.env`）；远程地址不接收本机令牌。`mcp test` 可测试配置中禁用的 Server，仅连接、握手、发现支持的工具/静态资源/提示词并立即回收，不执行调用；CLI 从 TOML 读取配置，不加载 API 的本机连接覆盖，OAuth 浏览器授权由设置页完成。显式 `--config` 时相对 Server 参数路径基于配置文件目录；应用默认基于仓库根目录。
 
 复制配置示例后先创建独立的 `demo-workspace` 目录，再启用 filesystem Server。默认只授予读取能力；示例已明确覆盖 `write_file/edit_file/create_directory/move_file` 的写权限要求，因此普通 Agent 请求会拒绝写入。容器镜像默认只有 Python；使用 npx/Node Server 时需要自建含 Node 的镜像并挂载独立演示目录。
 

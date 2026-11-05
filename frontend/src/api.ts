@@ -1,3 +1,5 @@
+import { localAuthHeaders, retryLocalAuth } from "./localAuth";
+
 export type MemoryStatus = "active" | "pending" | "superseded" | "deleted" | "rejected";
 export type MemoryKind = "semantic" | "episodic";
 
@@ -102,12 +104,14 @@ export async function requestWithDemoAuth(
   init: RequestInit = {},
 ): Promise<Response> {
   const send = (authorization: string | null) => {
-    const headers = new Headers(init.headers);
+    const headers = localAuthHeaders(input, init.headers);
     if (authorization) headers.set("Authorization", authorization);
-    return fetch(input, { ...init, headers });
+    return fetch(input, { ...init, headers, redirect: "error" });
   };
 
   let response = await send(getAuthHeader());
+  response = await retryLocalAuth(input, response, () => send(getAuthHeader()));
+  if (response.headers.get("www-authenticate") === "LocalToken") return response;
   if (response.status !== 401 || typeof window === "undefined") return response;
 
   if (!authPrompt) {

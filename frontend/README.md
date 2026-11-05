@@ -1,8 +1,10 @@
 # Frontend
 
-进度同步：2026-10-25，阶段 6 连接管理和审计修复已随 `4d3d903` 推送。前端 9 个测试文件、56 项测试及 TypeScript/生产构建通过；阶段 4 的完整人工交互和阶段 6 用户验收仍待完成，详见[开发状态](../docs/development-status.md)。本次推送未重启开发 API。
+进度同步：2026-11-05，阶段 6 连接管理和审计修复已随 `4d3d903` 推送。阶段 7 最新完整门禁前端 10 个测试文件、60 项测试及 TypeScript/生产构建通过；阶段 4 的完整人工交互和阶段 6 用户验收仍待完成，详见[开发状态](../docs/development-status.md)。本次推送未重启开发 API。
 
 React + Vite + TypeScript thin client.
+
+阶段 7 原生入口可在 API 根地址提供 `npm run build` 产物。首次请求需输入本机 `LOCAL_API_TOKEN`，凭据仅保存在当前标签页会话存储，与演示密码分开；不会将本机令牌发送到远程 API，也不跟随重定向。开发 Vite 入口继续使用相同认证流程。启动和验收状态见[阶段 7 记录](../docs/pre-desktop-stage7-local-delivery.md)。
 ## Memory Agent Web
 
 React + Vite 薄客户端，提供聊天主界面和可折叠的长期记忆面板。

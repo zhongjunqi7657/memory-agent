@@ -1,6 +1,6 @@
 # 系统架构
 
-状态同步：2026-10-25，阶段 5 已验收，阶段 6 实现及审计修复已通过 `4d3d903` 交付 `main`。阶段 6 待用户验收，阶段 4 人工演示和阶段 7 本地交付仍未完成；完整验证与限制见[开发状态](development-status.md)。
+状态同步：2026-11-05，阶段 5 已验收，阶段 6 实现及审计修复已通过 `4d3d903` 交付 `main`。阶段 6 待用户验收，阶段 4 人工演示未完成，阶段 7 本地交付代码已落地、整体验收待完成；完整验证与限制见[开发状态](development-status.md)。
 
 ## 请求与任务边界
 
@@ -111,5 +111,9 @@ final_score =
 ## 部署与安全
 
 Compose 运行 `api`、`worker` 和 `postgres`。线上演示必须设置独立的 `DASHSCOPE_API_KEY`、数据库和 `DEMO_SHARED_PASSWORD`，并保留输入长度、分钟限流和每日 Token 预算。单进程内存限流只适用于单副本演示，多副本需要外部共享限流存储。
+
+阶段 7 的 `app/local_runtime` 提供原生检查、显式迁移、启动和归档入口，API 根地址直接提供前端构建，保持 MCP OAuth 根地址回调。`local start` 绑定 loopback 后复用 API 租约、Checkpoint、RunController 和 MCP Manager，并管理独立 Worker；关闭只处理本实例拥有的资源。Worker 异常退出会关闭 API，应用数据与日志按绝对路径定位，SQLAlchemy 连接池在生命周期结束时释放。具体路径、命令和验收边界见[阶段 7 记录](pre-desktop-stage7-local-delivery.md)。
+
+默认本机环境用 `X-Local-Token` 统一保护控制接口，校验 loopback 对端、Host、受信任 Origin 和跨站请求；令牌不作为 URL 参数，不跟随重定向发送，也不发送到远程 API。标签页会话存储、本机日志和演示 Basic 密码各自独立；公开静态页面不含应用数据或凭据。显式 demo 模式必须配置共享密码并关闭本地执行，Compose 端口默认只发布到 loopback；这仍不提供操作系统沙箱。
 
 `GET /health` 会真实执行数据库查询；`GET /config` 只返回模型名、阈值和连接布尔状态。备份、恢复、预置演示数据和清空脚本位于 `scripts/`；清空数据同时处理业务表和 Checkpoint 表。

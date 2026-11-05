@@ -115,3 +115,6 @@ capabilities = ["network.access"]
 # scope = "read"
 # authorization_timeout_seconds = 300
 # default_token_ttl_seconds = 3600
+[runtime]
+shutdown_timeout_seconds = 15
+worker_startup_timeout_seconds = 60

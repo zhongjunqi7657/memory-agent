@@ -149,6 +149,7 @@ async def test_application_lifecycle_orders_checkpoint_and_mcp(monkeypatch):
     monkeypatch.setattr(main, "runtime_lease", lease)
     monkeypatch.setattr(main, "MCPConnectionManager", Manager)
     monkeypatch.setattr(main, "get_business_config", BusinessConfig)
+    monkeypatch.setattr(main, "settings", main.settings.model_copy(update={"local_api_token": "a" * 32}))
     async def recover():
         events.append("runs.recover")
 

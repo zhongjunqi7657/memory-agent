@@ -9,6 +9,16 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 
+@pytest.fixture(autouse=True)
+def legacy_endpoint_auth_environment(monkeypatch):
+    """Endpoint unit tests retain their demo policy; local boundary tests inject theirs."""
+    from app.config.settings import Settings
+    from app.security import local_access
+
+    monkeypatch.setattr(local_access, "get_settings", lambda: Settings(
+        _env_file=None, app_env="demo", demo_shared_password="unit-test-only"))
+
+
 @pytest.fixture(scope="session")
 def event_loop_policy():
     if sys.platform == "win32":

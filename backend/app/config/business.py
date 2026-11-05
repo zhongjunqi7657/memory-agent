@@ -12,6 +12,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.config.local import LocalExecutionConfig
+from app.config.runtime import RuntimeConfig
 from app.mcp.config import MCPConfig
 
 if sys.version_info >= (3, 11):
@@ -85,6 +86,7 @@ class BusinessConfig(BaseModel):
     tools: ToolConfig = ToolConfig()
     mcp: MCPConfig = MCPConfig()
     local: LocalExecutionConfig = LocalExecutionConfig()
+    runtime: RuntimeConfig = RuntimeConfig()
 
     @model_validator(mode="before")
     @classmethod
@@ -121,7 +123,10 @@ class BusinessConfig(BaseModel):
 def business_config_path() -> Path:
     override = os.environ.get("MEMORY_AGENT_CONFIG")
     if override:
-        return Path(override).resolve()
+        path = Path(override)
+        if not path.is_absolute():
+            raise ValueError("MEMORY_AGENT_CONFIG 必须使用绝对路径")
+        return path.resolve()
     source = Path(__file__).resolve()
     repository = source.parents[3] / "config.toml"
     installed = source.parents[2] / "config.toml"

@@ -1,6 +1,7 @@
 """Async SQLAlchemy engine and FastAPI session dependency."""
 
 from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -19,6 +20,14 @@ def create_engine() -> AsyncEngine:
 
 engine = create_engine()
 SessionFactory = async_sessionmaker(engine, expire_on_commit=False)
+
+
+@asynccontextmanager
+async def database_lifespan():
+    try:
+        yield
+    finally:
+        await engine.dispose()
 
 
 def get_session_factory() -> async_sessionmaker[AsyncSession]:
